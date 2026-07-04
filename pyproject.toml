@@ -1,0 +1,21 @@
+[project]
+name = "polarity_engine"
+version = "0.1.0"
+description = "Environment to build an isolated, runtime-enforced feature extraction engine that processes the multi-chain geometry of the 8R3Y complex and generates dense evolutionary representations"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "biopython>=1.87",
+    "numpy>=2.5.0",
+    "requests>=2.34.2",
+]
+
+[dependency-groups]
+dev = [
+    "black>=26.5.1",
+    "pytest>=9.1.1",
+    "pytest-mock>=3.15.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
