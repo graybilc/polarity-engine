@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO,
 
 class ProteinDataIngestor(object):
     """
-    A utility class to handle amino acid seuence, structure file, and density map.
+    A utility class to handle data files for amino acid seuence, structure, and density map.
     """
 
     def __init__(self, output_dir: Path):
@@ -42,9 +42,9 @@ class ProteinDataIngestor(object):
         Fetch the raw fasta sequence data from UniProt.
 
         Args:
-            uniprot_id (str) : UniProt API ID to programmatically retrieve FASTA
+            uniprot_id (str): UniProt API ID to programmatically retrieve FASTA
             of the desired protein.
-            target_name (str) : name of the target protein
+            target_name (str): name of the target protein
 
         Returns:
             str: string object containing metadata and amino acid sequence for the specified
@@ -139,7 +139,7 @@ class ProteinDataIngestor(object):
         Download EM density map from wwPDB
 
         Args:
-            emdb_id (str) : ID of the target structure for wwPDB
+            emdb_id (str): ID of the target structure for wwPDB
 
         Returns:
              final_path (Path): file path to map of the target structure.
@@ -208,10 +208,14 @@ def parse_arguments(args: list | None = None) -> argparse.Namespace:
             Defaults to None, which forces fallback evaluation of sys.argv.
     Returns:
         argparse.Namespace: Namespace object containing:
+            Required:
             - name (str): name of each target protein
             - uniprot_id (str): UniProt API ID for the each target protein
             - pdb_id (str): PDB ID(s) for the target protein(s)
             - outdir (Path): Output directory to store data
+            Optional:
+            - emdb_id (str): Optional ID of the target structure for wwPDB
+            - download-all, coords-only, or maps-only (bool): Mutually exclusive mode for download
     """
     parser = argparse.ArgumentParser(
         description="command line arguments provided to fetch_data.py"
@@ -290,9 +294,14 @@ def main(args: argparse.Namespace) -> None:
     Args:
         args (argparse.Namespace):
             Namespace object containing:
-               - name (str): target protein names
-               - uniprot_id (str): UniProt API ID for each target protein
-               - pdb_id (str): PDB ID for each target protein
+                Required:
+                - name (str): name of each target protein
+                - uniprot_id (str): UniProt API ID for the each target protein
+                - pdb_id (str): PDB ID(s) for the target protein(s)
+                - outdir (Path): Output directory to store data
+                Optional:
+                - emdb_id (str): Optional ID of the target structure for wwPDB
+                - download-all, coords-only, or maps-only (bool): Mutually exclusive mode for download
     """
     # 1. Determine active operational mode based on our flags
     is_maps_only = args.maps_only
