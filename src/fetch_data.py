@@ -5,6 +5,10 @@ import argparse
 import logging
 import os
 import requests
+import sys
+from tqdm import tqdm
+import urllib.request
+
 from Bio import PDB
 from pathlib import Path
 from urllib.error import URLError
@@ -15,111 +19,184 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 
-def retrieve_fasta(uniprot_id: str) -> str:
+class ProteinDataIngestor(object):
     """
-    Fetch the raw fasta sequence data from UniProt.
-
-    Args:
-        uniprot_id (str) : UniProt API ID to programmatically retrieve FASTA
-        of the desired protein.
-
-    Returns:
-        str: string object containing metadata and amino acid sequence for the specified
-        protein separated by a newline character. Raises error if client-side error or server error.
+    A utility class to handle amino acid seuence, structure file, and density map.
     """
-    logging.info(
-        f"Starting FASTA data retrieval for Uniprot ID {uniprot_id}...")
-    url_for_target = f"https://rest.uniprot.org/uniprotkb/{uniprot_id}.fasta"
-    try:
-        response = requests.get(url_for_target, timeout=10)
-        response.raise_for_status()
-        logging.info(f"Successfully fetched UniProt ID {uniprot_id}")
-        return response.text
-    except requests.exceptions.Timeout as t_err:
-        logging.error(
-            f"Timeout disruption resolved as [{type(t_err).__name__}]: Server or socket dropped.")
-        raise
 
-    except requests.exceptions.RequestException as e:
-        logging.error(f"An explicit network connection anomaly occurred: {e}")
-        raise
+    def __init__(self, output_dir: Path):
+        """
+        Constructor of ProteinDataIngestor class
 
+        Args:
+            output_dir (Path) : A pathlib.Path object representing the destination folder
+        """
+        self.output_dir = output_dir
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
-def save_text_to_disk(content: str, filename: str, output_dir: Path) -> Path:
-    """
-    Saves a raw text string to a physical file on disk within a specified directory Path.
+        # Persistent connection for connection pooling
+        self.session = requests.Session()
 
-    Args:
-        content (str): The raw text content to write (e.g., raw FASTA text).
-        filename (str): The target name of the file (e.g., "lgl_sequence.fasta").
-        output_dir (Path): A pathlib.Path object representing the destination folder.
+    def fetch_fasta(self, uniprot_id: str, target_name: str) -> str:
+        """
+        Fetch the raw fasta sequence data from UniProt.
 
-    Returns:
-        Path: A pathlib.Path object pointing to the absolute path of the written file.
-    """
-    full_path = output_dir / filename
+        Args:
+            uniprot_id (str) : UniProt API ID to programmatically retrieve FASTA
+            of the desired protein.
+            target_name (str) : name of the target protein
 
-    try:
-        with open(full_path, "w", encoding="utf-8") as f:
-            f.write(content)
+        Returns:
+            str: string object containing metadata and amino acid sequence for the specified
+            protein separated by a newline character. Raises error if client-side error or server error.
+        """
+        seq_dir = self.output_dir / "amino_acid_sequences"
+        seq_dir.mkdir(parents=True, exist_ok=True)
 
-        logging.info(f"Successfully wrote data to disk: {full_path}")
+        output_filename = seq_dir / f"{target_name.lower()}_sequence.fasta"
+        if output_filename.exists():
+            logging.info(
+                f"FASTA file for {uniprot_id} already exists in output directory. Skip fetching sequence step")
+            with open(output_filename, "r", encoding="utf-8") as f:
+                file_content = f.read()
+                return file_content
+        else:
+            logging.info(
+                f"Starting FASTA data retrieval for Uniprot ID {uniprot_id}...")
+            url_for_target = f"https://rest.uniprot.org/uniprotkb/{uniprot_id}.fasta"
+            try:
+                response = self.session.get(url_for_target, timeout=10)
+                response.raise_for_status()
+                logging.info(f"Successfully fetched UniProt ID {uniprot_id}")
+                output_filename.write_text(response.text, encoding="utf-8")
+                logging.info(
+                    f"Successfully wrote data to disk: {output_filename}")
+                return response.text
+            except requests.exceptions.Timeout as t_err:
+                logging.error(
+                    f"Timeout disruption resolved as [{type(t_err).__name__}]: Server or socket dropped.")
+                raise
 
-        return full_path.resolve()
+            except requests.exceptions.RequestException as e:
+                logging.error(
+                    f"An explicit network connection anomaly occurred: {e}")
+                raise
 
-    except IOError as io_err:
-        logging.error(f"Failed to write file to {full_path}: {io_err}")
-        raise
+    def fetch_cif(self, pdb_id: str) -> Path:
+        """
+        Download the target protein structure from Protein Data Bank.
 
+        Args:
+            pdb_id (str): ID of the target protein for Protein Data Bank
+            output_dir (Path): path to the directory where the output file is stored.
 
-def download_pdb_files(pdb_id: str, output_dir: Path) -> Path:
-    """
-    Download the target protein structure from Protein Data Bank.
+        Returns:
+            final_path (Path): file path to .cif of the target protein.
+        """
+        structure_dir = self.output_dir / "structures"
+        structure_dir.mkdir(parents=True, exist_ok=True)
 
-    Args:
-        pdb_id (str): ID of the target protein for Protein Data Bank
-        output_dir (Path): path to the directory where the output file is stored.
+        logging.info(f"Downloading PDB structure {pdb_id} from RCSB...")
+        clean_id = pdb_id.strip().upper()
+        try:
+            pdbl = PDB.PDBList()
 
-    Returns:
-        final_path (Path): file path to .cif of the target protein. 
-    """
-    logging.info(f"Downloading PDB structure {pdb_id} from RCSB...")
-    clean_id = pdb_id.strip().upper()
-    try:
-        pdbl = PDB.PDBList()
+            raw_string_path = pdbl.retrieve_pdb_file(
+                clean_id, pdir=structure_dir, file_format="mmCif"
+            )
 
-        raw_string_path = pdbl.retrieve_pdb_file(
-            clean_id, pdir=output_dir, file_format="mmCif"
-        )
+            if not raw_string_path or not os.path.exists(raw_string_path):
+                logging.error(
+                    f"Structure {clean_id} could not be pulled or written.")
+                raise FileNotFoundError(
+                    f"Failed to write structural files for {clean_id}")
 
-        if not raw_string_path or not os.path.exists(raw_string_path):
+            # Cast the returned string back into a Path object
+            final_path = Path(raw_string_path)
+            logging.info(
+                f"Successfully secured structural records at: {final_path}")
+            return final_path
+
+        except URLError as net_err:
             logging.error(
-                f"Structure {clean_id} could not be pulled or written.")
-            raise FileNotFoundError(
-                f"Failed to write structural files for {clean_id}")
+                f"Network timeout or server disruption hitting PDB: {net_err}"
+            )
+            raise RuntimeError(
+                "Pipeline stopped: Remote server unreachable."
+            ) from net_err
+        except PermissionError as perm_err:
+            logging.error(
+                f"Write permissions denied on target storage '{self.output_dir}': {perm_err}"
+            )
+            raise
+        except Exception as general_err:
+            logging.error(
+                f"Unexpected structural ingest anomaly detected: {general_err}")
+            raise
 
-        # Cast the returned string back into a Path object
-        final_path = Path(raw_string_path)
-        logging.info(
-            f"Successfully secured structural records at: {final_path}")
-        return final_path
+    def fetch_em_density_map(self, emdb_id: str) -> Path:
+        """
+        Download EM density map from wwPDB
 
-    except URLError as net_err:
-        logging.error(
-            f"Network timeout or server disruption hitting wwPDB: {net_err}"
-        )
-        raise RuntimeError(
-            "Pipeline stopped: Remote server unreachable."
-        ) from net_err
-    except PermissionError as perm_err:
-        logging.error(
-            f"Write permissions denied on target storage '{output_dir}': {perm_err}"
-        )
-        raise
-    except Exception as general_err:
-        logging.error(
-            f"Unexpected structural ingest anomaly detected: {general_err}")
-        raise
+        Args:
+            emdb_id (str) : ID of the target structure for wwPDB
+
+        Returns:
+             final_path (Path): file path to map of the target structure.
+        """
+        emdb_id_clean = emdb_id.upper()
+        file_id = emdb_id_clean.lower().replace("-", "_")
+
+        density_map_dir = self.output_dir / "density_maps"
+        density_map_dir.mkdir(parents=True, exist_ok=True)
+
+        final_path = density_map_dir / f"{emdb_id_clean.lower()}.map"
+        if final_path.exists():
+            logging.info(f"Using cached EM density map at: {final_path}")
+            return final_path
+        else:
+            try:
+                emdb_url = f"https://files.rcsb.org/pub/emdb/structures/{emdb_id_clean}/map/{file_id}.map.gz"
+                logging.info(f"Streaming map data for {emdb_id_clean} from wwPDB...")
+
+                # CRITICAL FIX: stream=True enables real-time chunked streaming over the wire
+                with self.session.get(emdb_url, timeout=30, stream=True) as response:
+                    response.raise_for_status()
+                    total_size = int(response.headers.get('Content-Length', 0))
+
+                    # Compound with-statement drastically flattens nesting levels
+                    with tqdm(total=total_size, unit='B', unit_scale=True, desc=f"Downloading {emdb_id_clean}") as pbar, \
+                        open(final_path, "wb") as f:
+                        
+                        for chunk in response.iter_content(chunk_size=1024 * 1024):
+                            if chunk:
+                                f.write(chunk)
+                                pbar.update(len(chunk))
+
+                logging.info(f"Successfully secured compressed EM density map at: {final_path}")
+                return final_path
+
+            except URLError as net_err:
+                logging.error(
+                    f"Network timeout or server disruption hitting EMDB: {net_err}"
+                )
+                raise RuntimeError(
+                    "Pipeline stopped: Remote server unreachable."
+                ) from net_err
+            except PermissionError as perm_err:
+                logging.error(
+                    f"Write permissions denied on target storage '{density_map_dir}': {perm_err}"
+                )
+                raise
+            except Exception as general_err:
+                if final_path.exists():
+                    final_path.unlink()
+                logging.error(
+                    f"Unexpected structural ingest anomaly detected: {general_err}")
+                raise
+
+    def fetch_xray_crystal_density_map(self):
+        raise NotImplementedError()
 
 
 def parse_arguments(args: list | None = None) -> argparse.Namespace:
@@ -127,7 +204,7 @@ def parse_arguments(args: list | None = None) -> argparse.Namespace:
     Parse the command line arguments provided to fetch_data.py.
 
     Args:
-        args (list[str] | None): A custom array of argument strings to evaluate. 
+        args (list[str] | None): A custom array of argument strings to evaluate.
             Defaults to None, which forces fallback evaluation of sys.argv.
     Returns:
         argparse.Namespace: Namespace object containing:
@@ -168,11 +245,38 @@ def parse_arguments(args: list | None = None) -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "-e",
+        "--emdb_id",
+        type=str,
+        nargs="+",
+        required=False,
+        help="EMDB IDs for cryo-EM density maps. If multiple, list items separated by space.",
+    )
+
+    parser.add_argument(
         "-o",
         "--outdir",
         type=Path,
         required=True,
         help="Output directory to store data"
+    )
+
+    # Mode-Based Mutually Exclusive Group
+    mode_group = parser.add_mutually_exclusive_group(required=False)
+    mode_group.add_argument(
+        "--download-all",
+        action="store_true",
+        help="Fetch FASTA sequences, PDB structures, and EMDB density maps (Default)."
+    )
+    mode_group.add_argument(
+        "--coords-only",
+        action="store_true",
+        help="Fetch FASTA sequences and PDB structures only. Skip heavy voxel maps."
+    )
+    mode_group.add_argument(
+        "--maps-only",
+        action="store_true",
+        help="Fetch EMDB density maps only. Skip sequences and coordinate files."
     )
     return parser.parse_args(args)
 
@@ -184,45 +288,61 @@ def main(args: argparse.Namespace) -> None:
         2. Download structural information file(s)
 
     Args:
-        args (argparse.Namespace): 
+        args (argparse.Namespace):
             Namespace object containing:
                - name (str): target protein names
                - uniprot_id (str): UniProt API ID for each target protein
                - pdb_id (str): PDB ID for each target protein
     """
-    # Initialize output directories
-    seq_dir = args.outdir / "amino_acid_sequences"
-    struct_dir = args.outdir / "structures"
+    # 1. Determine active operational mode based on our flags
+    is_maps_only = args.maps_only
+    is_coords_only = args.coords_only
 
-    seq_dir.mkdir(parents=True, exist_ok=True)
-    struct_dir.mkdir(parents=True, exist_ok=True)
+    # Default to downloading everything if no specific mode flag was explicitly passed
+    is_download_all = args.download_all or (
+        not is_maps_only and not is_coords_only)
+
+    # 2. Defensive check for EMDB IDs if a map-related mode is running
+    if (is_download_all or is_maps_only) and not args.emdb_id:
+        logging.error(
+            "Execution configuration error: An EMDB ID (-m/--emdb_id) must be provided to download maps.")
+        raise ValueError(
+            "Missing required EMDB identifier for active execution mode.")
+
+    # 3. Instantiate our class tool
+    ingestor = ProteinDataIngestor(output_dir=args.outdir)
 
     if len(args.name) != len(args.uniprot_id):
         logging.error(
-            "The number of names does not match the number of UniProt IDs.")
+            "Mismatched parallel input arguments: names do not map 1:1 with UniProt IDs.")
         raise ValueError("Mismatched parallel input arguments.")
 
     targets = dict(zip(args.name, args.uniprot_id))
 
     try:
-        if len(args.name) != len(args.uniprot_id):
-            raise ValueError(
-                "The number of names does not match the number of UniProt IDs.")
+        # --- PHASE 1: SEQUENCES & COORDINATES ---
+        if is_download_all or is_coords_only:
+            logging.info(
+                "--- PHASE 1: FETCHING SEQUENCES AND STRUCTURE COORDINATES ---")
 
-        targets = dict(zip(args.name, args.uniprot_id))
+            for name, uniprot_id in targets.items():
+                # This returns string content (and will internally cache correctly)
+                _ = ingestor.fetch_fasta(uniprot_id, name)
 
-        logging.info("--- PHASE 1: FETCHING AMINO ACID SEQUENCES ---")
-        for name, uniprot_id in targets.items():
-            raw_fasta_text = retrieve_fasta(uniprot_id)
+            for pdb_id in args.pdb_id:
+                ingestor.fetch_cif(pdb_id)
 
-            file_name = f"{name.lower()}_sequence.fasta"
-            save_text_to_disk(raw_fasta_text, file_name, seq_dir)
+        # --- PHASE 2: EM DENSITY MAPS ---
+        if is_download_all or is_maps_only:
+            logging.info(
+                "--- PHASE 2: DOWNLOADING BINARY ELECTRON DENSITY MAPS ---")
 
-        logging.info("--- PHASE 2: DOWNLOADING STRUCTURE FILES ---")
-        output_file_paths = [download_pdb_files(
-            pdb_id, struct_dir) for pdb_id in args.pdb_id]
+            for emdb_id in args.emdb_id:
+                ingestor.fetch_em_density_map(emdb_id)
+
     except Exception as e:
-        logging.error(f"Pipeline failed: {e}")
+        logging.exception(f"Pipeline failed during execution block: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
