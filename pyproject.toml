@@ -8,6 +8,7 @@ dependencies = [
     "biopython>=1.87",
     "numpy>=2.5.0",
     "requests>=2.34.2",
+    "tqdm>=4.68.3",
 ]
 
 [dependency-groups]
