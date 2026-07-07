@@ -157,7 +157,8 @@ class ProteinDataIngestor(object):
         else:
             try:
                 emdb_url = f"https://files.rcsb.org/pub/emdb/structures/{emdb_id_clean}/map/{file_id}.map.gz"
-                logging.info(f"Streaming map data for {emdb_id_clean} from wwPDB...")
+                logging.info(
+                    f"Streaming map data for {emdb_id_clean} from wwPDB...")
 
                 # CRITICAL FIX: stream=True enables real-time chunked streaming over the wire
                 with self.session.get(emdb_url, timeout=30, stream=True) as response:
@@ -166,14 +167,15 @@ class ProteinDataIngestor(object):
 
                     # Compound with-statement drastically flattens nesting levels
                     with tqdm(total=total_size, unit='B', unit_scale=True, desc=f"Downloading {emdb_id_clean}") as pbar, \
-                        open(final_path, "wb") as f:
-                        
+                            open(final_path, "wb") as f:
+
                         for chunk in response.iter_content(chunk_size=1024 * 1024):
                             if chunk:
                                 f.write(chunk)
                                 pbar.update(len(chunk))
 
-                logging.info(f"Successfully secured compressed EM density map at: {final_path}")
+                logging.info(
+                    f"Successfully secured compressed EM density map at: {final_path}")
                 return final_path
 
             except URLError as net_err:
@@ -268,11 +270,6 @@ def parse_arguments(args: list | None = None) -> argparse.Namespace:
     # Mode-Based Mutually Exclusive Group
     mode_group = parser.add_mutually_exclusive_group(required=False)
     mode_group.add_argument(
-        "--download-all",
-        action="store_true",
-        help="Fetch FASTA sequences, PDB structures, and EMDB density maps (Default)."
-    )
-    mode_group.add_argument(
         "--coords-only",
         action="store_true",
         help="Fetch FASTA sequences and PDB structures only. Skip heavy voxel maps."
@@ -280,12 +277,13 @@ def parse_arguments(args: list | None = None) -> argparse.Namespace:
     mode_group.add_argument(
         "--maps-only",
         action="store_true",
+
         help="Fetch EMDB density maps only. Skip sequences and coordinate files."
     )
     return parser.parse_args(args)
 
 
-def main(args: argparse.Namespace) -> None:
+def main(args_list: argparse.Namespace) -> None:
     """
     main function will accomplish 2 things:
         1. Fetch amino acid sequnce of each target protein
@@ -301,15 +299,16 @@ def main(args: argparse.Namespace) -> None:
                 - outdir (Path): Output directory to store data
                 Optional:
                 - emdb_id (str): Optional ID of the target structure for wwPDB
-                - download-all, coords-only, or maps-only (bool): Mutually exclusive mode for download
+                - coords-only, or maps-only (bool): Mutually exclusive mode for download, default is to download all.
     """
+    args = parse_arguments(args_list)
+    
     # 1. Determine active operational mode based on our flags
     is_maps_only = args.maps_only
     is_coords_only = args.coords_only
 
     # Default to downloading everything if no specific mode flag was explicitly passed
-    is_download_all = args.download_all or (
-        not is_maps_only and not is_coords_only)
+    is_download_all = not (is_maps_only or is_coords_only)
 
     # 2. Defensive check for EMDB IDs if a map-related mode is running
     if (is_download_all or is_maps_only) and not args.emdb_id:
