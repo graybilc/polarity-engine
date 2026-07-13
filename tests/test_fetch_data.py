@@ -1,19 +1,17 @@
-#!/usr/bin/env python3
+#! /usr/bin/env python3
 
 
 import os
 import pytest
 import requests
+
 from Bio.PDB.PDBList import PDBList
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 from urllib.error import URLError
+
 from src.fetch_data import ProteinDataIngestor, parse_arguments, main
-
-UNIPROT_ID = "P51617"
-TARGET_NAME = "lgl"
-MOCK_FASTA_CONTENT = ">tr|A0A024RBG1|A0A024RBG1_HUMAN N-asymmetry factor\nMGNCCAGLSRRL\nKLPDCMA\n"
-
+from tests.mock_data import UNIPROT_ID, TARGET_NAME, MOCK_LGL_FASTA_CONTENT
 
 @pytest.fixture
 def ingestor(tmp_path):
@@ -31,7 +29,7 @@ class TestProteinDataIngestor:
 
         Arrange:
             Inject a mocked HTTP 200 response configured to return a 
-            controlled MOCK_FASTA_CONTENT string.
+            controlled MOCK_LGL_FASTA_CONTENT string.
         Act:
             Invoke retrieve_fasta with a target UniProt ID (P51617).
         Assert:
@@ -42,7 +40,7 @@ class TestProteinDataIngestor:
         """
         mock_response = mocker.MagicMock()
         mock_response.status_code = 200
-        mock_response.text = MOCK_FASTA_CONTENT
+        mock_response.text = MOCK_LGL_FASTA_CONTENT
 
         mock_get = mocker.patch.object(
             ingestor.session, "get", return_value=mock_response)
@@ -50,7 +48,7 @@ class TestProteinDataIngestor:
         result = ingestor.fetch_fasta(UNIPROT_ID, TARGET_NAME)
 
         # 1. Assert string output values match up perfectly
-        assert result == MOCK_FASTA_CONTENT
+        assert result == MOCK_LGL_FASTA_CONTENT
 
         # 2. Assert against mock_get to verify the network parameters
         mock_get.call_count == 1
@@ -59,7 +57,7 @@ class TestProteinDataIngestor:
         expected_file = ingestor.output_dir / "amino_acid_sequences" / \
             f"{TARGET_NAME.lower()}_sequence.fasta"
         assert expected_file.exists()
-        assert expected_file.read_text(encoding="utf-8") == MOCK_FASTA_CONTENT
+        assert expected_file.read_text(encoding="utf-8") == MOCK_LGL_FASTA_CONTENT
 
     def test_fetch_fasta_timeout_error(self, ingestor, mocker):
         """
