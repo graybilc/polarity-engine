@@ -2,6 +2,7 @@
 
 
 import pytest
+from Bio.PDB.Structure import Structure
 
 from src.parsers import FastaParser, StructureParser
 from tests.mock_data import MOCK_LGL_FASTA_CONTENT, MOCK_APKC_FASTA_CONTENT, MOCK_PDB_CONTENT
@@ -299,3 +300,27 @@ class TestStructureParser:
 
         with pytest.raises(FileNotFoundError, match="Target structure file not found"):
             structure_parser_cls._validate_structure_file(mock_cif_path)
+
+    def test_load_and_inspect_success_with_pdb_file(cls, structure_parser_cls, tmp_path):
+        """
+        Ensure a tuple of list of unique chain_ids and a Structure object is returned.
+
+        Arrange:
+            Generate an isolated directory with a valid .pdb file
+        Act:
+            invoke _load_and_inspect method.
+        Assert:
+            Verify the expected tuple is returned.
+        """
+        structure_dir = tmp_path / "structures"
+        structure_dir.mkdir(parents=True, exist_ok=True)
+
+        mock_cif_path = structure_dir / "test_structure_file.pdb"
+        mock_cif_path.write_text(MOCK_PDB_CONTENT, encoding="utf-8")
+
+        test_chains, test_data = structure_parser_cls._load_and_inspect(
+            mock_cif_path, ".pdb")
+        
+        print(test_data)
+        assert test_chains == ["A"]
+        assert type(test_data) == Structure
