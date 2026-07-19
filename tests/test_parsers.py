@@ -3,8 +3,8 @@
 
 import pytest
 
-from src.parsers import FastaParser
-from tests.mock_data import MOCK_LGL_FASTA_CONTENT, MOCK_APKC_FASTA_CONTENT
+from src.parsers import FastaParser, StructureParser
+from tests.mock_data import MOCK_LGL_FASTA_CONTENT, MOCK_APKC_FASTA_CONTENT, MOCK_PDB_CONTENT
 
 
 @pytest.fixture
@@ -13,6 +13,14 @@ def fasta_parser_cls():
     Returns the FastaParser class handle for classmethod calls.
     """
     return FastaParser
+
+
+@pytest.fixture
+def structure_parser_cls():
+    """
+    Returns the StructureParser class handle for classmethod calls.
+    """
+    return StructureParser
 
 
 class TestFastaParser:
@@ -108,7 +116,7 @@ class TestFastaParser:
         mock_fasta_path = aa_sequence_dir / "no_data_file.fasta"
         mock_fasta_path.write_text("", encoding="utf-8")
 
-        with pytest.raises(ValueError, match="contains no data"):
+        with pytest.raises(ValueError, match="contains no entries"):
             fasta_parser_cls.parse_fasta(mock_fasta_path)
 
     def test_fasta_parser_no_header_error(self, fasta_parser_cls, tmp_path):
@@ -150,7 +158,7 @@ class TestFastaParser:
         mock_data = ">tr|A0A024RBG1|A0A024RBG1_HUMAN N-asymmetry factor\n"
         mock_fasta_path.write_text(mock_data, encoding="utf-8")
 
-        with pytest.raises(ValueError, match="has no associated sequence data"):
+        with pytest.raises(ValueError, match="Empty sequence string encountered under header"):
             fasta_parser_cls.parse_fasta(mock_fasta_path)
 
     def test_validate_amino_acid_sequence_all_standard_success(self, fasta_parser_cls):
@@ -159,18 +167,19 @@ class TestFastaParser:
         in FASTA file are standard and valid.
 
         Arrange:
-            Generate an isolated a sequence string with standard amino acids.
+            Generate an isolated sequence string with standard amino acids.
         Act:
-            Invoke the validate_amino_acid_sequence method.
+            Invoke the _validate_amino_acid_sequence method.
         Assert:
-            Verify True is returned.
+            Amino acid sequence is returned.
         """
+        test_header = ">tr|A0A024RBG1|A0A024RBG1_HUMAN N-asymmetry factor\n"
         test_sequence = "MGNCCAGLSRRLKLPDCMA"
 
-        test_output = fasta_parser_cls.validate_amino_acid_sequence(
-            test_sequence)
+        test_output = fasta_parser_cls._validate_amino_acid_sequence(
+            test_sequence, test_header)
 
-        assert test_output is True
+        assert test_output == test_output
 
     def test_validate_amino_acid_sequence_non_standard_success(self, fasta_parser_cls, caplog):
         """
@@ -178,23 +187,24 @@ class TestFastaParser:
         contains two non-standard amino acids but still valid.
 
         Arrange:
-            Generate an isolated a sequence string containing two non-standard amino acids.
+            Generate an isolated sequence string containing two non-standard amino acids.
         Act:
-            Invoke the validate_amino_acid_sequence method.
+            Invoke the _validate_amino_acid_sequence method.
         Assert:
-            Verify True is returned and exactly two warnings are emitted to the log.
+            Verify the amino acid sequence is returned and exactly two warnings are emitted to the log.
         """
+        test_header = ">tr|A0A024RBG1|A0A024RBG1_HUMAN N-asymmetry factor\n"
         # 'U' at position 2 and 'Z' at position 17 are non-standard but valid
         test_sequence = "MUGNCCAGLSRRLKLPZDCMA"
 
-        test_output = fasta_parser_cls.validate_amino_acid_sequence(
-            test_sequence)
+        test_output = fasta_parser_cls._validate_amino_acid_sequence(
+            test_sequence, test_header)
 
         # Filter captured log records to isolate warnings from this test execution
         warning_records = [
             rec for rec in caplog.records if rec.levelname == "WARNING"]
 
-        assert test_output is True
+        assert test_output == test_sequence
         assert len(warning_records) == 2
         assert "Non-standard amino acid 'U' found at position 2" in warning_records[0].message
         assert "Non-standard amino acid 'Z' found at position 17" in warning_records[1].message
@@ -206,42 +216,86 @@ class TestFastaParser:
         Arrange:
             Generate an empty string.
         Act:
-            Invoke the validate_amino_acid_sequence method.
+            Invoke the _validate_amino_acid_sequence method.
         Assert:
-            Verify False is returned and exactly one error message is emitted to the log.
+            Verify no amino acid is returned and exactly one error message is emitted to the log.
         """
+        test_header = ">tr|A0A024RBG1|A0A024RBG1_HUMAN N-asymmetry factor\n"
         test_sequence = ""
-        test_output = fasta_parser_cls.validate_amino_acid_sequence(test_sequence)
+
+        with pytest.raises(ValueError, match="Empty sequence string encountered under header"):
+            fasta_parser_cls._validate_amino_acid_sequence(
+            test_sequence, test_header)
 
         error_records = [
             rec for rec in caplog.records if rec.levelname == "ERROR"]
 
-        assert test_output is False
         assert len(error_records) == 1
-        assert "Empty sequence string was passed" in error_records[0].message
-    
+
     def test_validate_amino_acid_sequence_invalid_sequence_error(self, fasta_parser_cls, caplog):
         """
         Verify that validate_amino_acid_sequence returns False when amino acid string 
         containining two invalid amino acids is passed.
 
         Arrange:
-            Generate an isolated a sequence string containing two non-standard amino acids.
+            Generate an isolated sequence string containing two non-standard amino acids.
         Act:
             Invoke the validate_amino_acid_sequence method.
         Assert:
             Verify True is returned and exactly two errors are emitted to the log.
         """
-        # '!' at position 2 and '$' at position 17 are invalid
-        test_sequence = "M!GNCCAGLSRRLKLP$DCMA"
+        test_header = ">tr|A0A024RBG1|A0A024RBG1_HUMAN N-asymmetry factor\n"
+        # '!' at position 2 is invalid
+        test_sequence = "M!GNCCAGLSRRLKLPDCMA"
 
-        test_output = fasta_parser_cls.validate_amino_acid_sequence(
-            test_sequence)
+        with pytest.raises(ValueError, match="Invalid amino acid '!' found at position 2"):
+            fasta_parser_cls._validate_amino_acid_sequence(
+            test_sequence, test_header)
 
         error_records = [
             rec for rec in caplog.records if rec.levelname == "ERROR"]
 
-        assert test_output is False
-        assert len(error_records) == 2
-        assert "Invalid amino acid '!' found at position 2" in error_records[0].message
-        assert "Invalid amino acid '$' found at position 17" in error_records[1].message
+        assert len(error_records) == 1
+
+
+class TestStructureParser:
+    """
+    Groups all unit tests validating the state and side-effects of StructureParser
+    """
+    def test_validate_structure_file_success(cls, structure_parser_cls, tmp_path):
+        """
+        Ensure that _validate_structure_file returns file extention when valid file path is passed.
+
+        Arrange:
+            Generate an isolated structure file with .cif extention on disk.
+        Act:
+            Invoke the _validate_structure_file method.
+        Assert:
+            Verify .cif is returned.
+        """
+        structure_dir = tmp_path / "structures"
+        structure_dir.mkdir(parents=True, exist_ok=True)
+
+        mock_cif_path = structure_dir / "test_structure_file.cif"
+        mock_cif_path.write_text(MOCK_PDB_CONTENT, encoding="utf-8")
+
+        test_invoke = structure_parser_cls._validate_structure_file(
+            mock_cif_path)
+
+        assert test_invoke == ".cif"
+    
+    def test_validate_structure_file_error(cls, structure_parser_cls, tmp_path):
+        """
+        Ensure FileNotFoundError is raised when an inalid file path is passed.
+
+       Arrange:
+            Generate an isolated directory without structure file on disk.
+        Act:
+            Invoke the _validate_structure_file method.
+        Assert:
+            FileNotFoundError is raised.
+        """
+        mock_cif_path = tmp_path / "structures" / "non_existent_file.cif"
+
+        with pytest.raises(FileNotFoundError, match="Target structure file not found"):
+            structure_parser_cls._validate_structure_file(mock_cif_path)
