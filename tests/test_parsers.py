@@ -1,11 +1,16 @@
 #!/urs/bin/env python3
 
 
+import logging
+import numpy as np
 import pytest
+
 from Bio.PDB.Structure import Structure
+from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 from src.parsers import FastaParser, StructureParser
-from tests.mock_data import MOCK_LGL_FASTA_CONTENT, MOCK_APKC_FASTA_CONTENT, MOCK_PDB_CONTENT
+from tests.mock_data import MOCK_LGL_FASTA_CONTENT, MOCK_APKC_FASTA_CONTENT, MOCK_PDB_CONTENT_1, MOCK_CIF_CONTENT
 
 
 @pytest.fixture
@@ -31,7 +36,7 @@ class TestFastaParser:
 
     def test_fasta_parser_one_header_success(self, fasta_parser_cls, tmp_path):
         """
-        Verify that parse_fasta returns a dictionary mapping header strings to 
+        Verify that parse_fasta returns a dictionary mapping header strings to
         clean sequence strings under normal valid multi-line conditions.
 
         Arrange:
@@ -57,7 +62,7 @@ class TestFastaParser:
 
     def test_fasta_parser_two_headers_success(self, fasta_parser_cls, tmp_path):
         """
-        Verify that parse_fasta returns a dictionary mapping header strings to 
+        Verify that parse_fasta returns a dictionary mapping header strings to
         clean sequence strings under normal valid multi-line conditions.
 
         Arrange:
@@ -109,7 +114,7 @@ class TestFastaParser:
         Act:
             Invoke the parse_fasta method.
         Assert:
-            ValueError is raised. 
+            ValueError is raised.
         """
         aa_sequence_dir = tmp_path / "amino_acid_sequences"
         aa_sequence_dir.mkdir(parents=True, exist_ok=True)
@@ -129,7 +134,7 @@ class TestFastaParser:
         Act:
             Invoke the parse_fasta method.
         Assert:
-            ValueError is raised. 
+            ValueError is raised.
         """
         aa_sequence_dir = tmp_path / "amino_acid_sequences"
         aa_sequence_dir.mkdir(parents=True, exist_ok=True)
@@ -150,7 +155,7 @@ class TestFastaParser:
         Act:
             Invoke the parse_fasta method.
         Assert:
-            ValueError is raised. 
+            ValueError is raised.
         """
         aa_sequence_dir = tmp_path / "amino_acid_sequences"
         aa_sequence_dir.mkdir(parents=True, exist_ok=True)
@@ -164,7 +169,7 @@ class TestFastaParser:
 
     def test_validate_amino_acid_sequence_all_standard_success(self, fasta_parser_cls):
         """
-        Verify that validate_amino_acid_sequence returns True when all amino acids 
+        Verify that validate_amino_acid_sequence returns True when all amino acids
         in FASTA file are standard and valid.
 
         Arrange:
@@ -184,7 +189,7 @@ class TestFastaParser:
 
     def test_validate_amino_acid_sequence_non_standard_success(self, fasta_parser_cls, caplog):
         """
-        Verify that validate_amino_acid_sequence returns True when amino acid string 
+        Verify that validate_amino_acid_sequence returns True when amino acid string
         contains two non-standard amino acids but still valid.
 
         Arrange:
@@ -226,7 +231,7 @@ class TestFastaParser:
 
         with pytest.raises(ValueError, match="Empty sequence string encountered under header"):
             fasta_parser_cls._validate_amino_acid_sequence(
-            test_sequence, test_header)
+                test_sequence, test_header)
 
         error_records = [
             rec for rec in caplog.records if rec.levelname == "ERROR"]
@@ -235,7 +240,7 @@ class TestFastaParser:
 
     def test_validate_amino_acid_sequence_invalid_sequence_error(self, fasta_parser_cls, caplog):
         """
-        Verify that validate_amino_acid_sequence returns False when amino acid string 
+        Verify that validate_amino_acid_sequence returns False when amino acid string
         containining two invalid amino acids is passed.
 
         Arrange:
@@ -251,7 +256,7 @@ class TestFastaParser:
 
         with pytest.raises(ValueError, match="Invalid amino acid '!' found at position 2"):
             fasta_parser_cls._validate_amino_acid_sequence(
-            test_sequence, test_header)
+                test_sequence, test_header)
 
         error_records = [
             rec for rec in caplog.records if rec.levelname == "ERROR"]
@@ -263,12 +268,13 @@ class TestStructureParser:
     """
     Groups all unit tests validating the state and side-effects of StructureParser
     """
-    def test_validate_structure_file_success(cls, structure_parser_cls, tmp_path):
+
+    def test_validate_structure_file_success(self, structure_parser_cls, tmp_path):
         """
-        Ensure that _validate_structure_file returns file extention when valid file path is passed.
+        Ensure that _validate_structure_file returns file extension when valid file path is passed.
 
         Arrange:
-            Generate an isolated structure file with .cif extention on disk.
+            Generate an isolated structure file with .cif extension on disk.
         Act:
             Invoke the _validate_structure_file method.
         Assert:
@@ -278,18 +284,18 @@ class TestStructureParser:
         structure_dir.mkdir(parents=True, exist_ok=True)
 
         mock_cif_path = structure_dir / "test_structure_file.cif"
-        mock_cif_path.write_text(MOCK_PDB_CONTENT, encoding="utf-8")
+        mock_cif_path.write_text(MOCK_PDB_CONTENT_1, encoding="utf-8")
 
         test_invoke = structure_parser_cls._validate_structure_file(
             mock_cif_path)
 
         assert test_invoke == ".cif"
-    
-    def test_validate_structure_file_error(cls, structure_parser_cls, tmp_path):
-        """
-        Ensure FileNotFoundError is raised when an inalid file path is passed.
 
-       Arrange:
+    def test_validate_structure_file_error(self, structure_parser_cls, tmp_path):
+        """
+        Ensure FileNotFoundError is raised when an invalid file path is passed.
+
+        Arrange:
             Generate an isolated directory without structure file on disk.
         Act:
             Invoke the _validate_structure_file method.
@@ -301,7 +307,7 @@ class TestStructureParser:
         with pytest.raises(FileNotFoundError, match="Target structure file not found"):
             structure_parser_cls._validate_structure_file(mock_cif_path)
 
-    def test_load_and_inspect_success_with_pdb_file(cls, structure_parser_cls, tmp_path):
+    def test_load_and_inspect_success_with_pdb_file(self, structure_parser_cls, tmp_path):
         """
         Ensure a tuple of list of unique chain_ids and a Structure object is returned.
 
@@ -315,12 +321,296 @@ class TestStructureParser:
         structure_dir = tmp_path / "structures"
         structure_dir.mkdir(parents=True, exist_ok=True)
 
-        mock_cif_path = structure_dir / "test_structure_file.pdb"
-        mock_cif_path.write_text(MOCK_PDB_CONTENT, encoding="utf-8")
+        mock_pdb_path = structure_dir / "test_structure_file.pdb"
+        mock_pdb_path.write_text(MOCK_PDB_CONTENT_1, encoding="utf-8")
 
         test_chains, test_data = structure_parser_cls._load_and_inspect(
-            mock_cif_path, ".pdb")
-        
-        print(test_data)
+            mock_pdb_path, ".pdb"
+        )
+
         assert test_chains == ["A"]
-        assert type(test_data) == Structure
+        assert isinstance(test_data, Structure)
+
+    def test_load_and_inspect_multi_model_in_pdb(self, structure_parser_cls, caplog):
+        """
+        Verifies that _load_and_inspect logs a warning and defaults to Model 0
+        when a PDB file contains more than one model.
+
+        Arrange:
+            Configure a mock structure ensemble containing 3 models.
+        Act:
+            invoke _load_and_inspect method under an isolated get_structure patch context.
+        Assert:
+            Verify the expected tuple is returned and a warning is logged.
+        """
+        file_path = Path("mock_multi_model.pdb")
+        file_ext = ".pdb"
+
+        mock_structure = MagicMock()
+        mock_structure.__len__.return_value = 3
+
+        mock_model_0 = MagicMock()
+        mock_model_0.child_dict.keys.return_value = ["A", "B"]
+        mock_structure.__getitem__.return_value = mock_model_0
+
+        # Patch the PDBParser instance method directly to avoid filesystem checks
+        with patch("src.parsers.PDBParser.get_structure", return_value=mock_structure):
+            with caplog.at_level(logging.WARNING, logger="src.parsers"):
+                chains, struct = structure_parser_cls._load_and_inspect(
+                    file_path, file_ext
+                )
+
+        assert chains == ["A", "B"]
+        assert struct == mock_structure
+        assert len(caplog.records) == 1
+        assert caplog.records[0].levelname == "WARNING"
+        assert "contains 3 models. Defaulting to Model 0." in caplog.text
+
+    def test_load_and_inspect_with_invalid_pdb_error(self, structure_parser_cls, tmp_path):
+        """
+        Verify ValueError is raised when an invalid file path is passed.
+
+        Arrange:
+            Generate an empty/corrupted file with a .pdb extension.
+        Act:
+            invoke _load_and_inspect method.
+        Assert:
+            Verify a ValueError describing a malformed PDB structure is raised.
+        """
+        structure_dir = tmp_path / "structures"
+        structure_dir.mkdir(parents=True, exist_ok=True)
+
+        mock_pdb_path = structure_dir / "test_structure_file.pdb"
+        mock_pdb_path.write_text("", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="Malformed PDB file structure"):
+            structure_parser_cls._load_and_inspect(mock_pdb_path, ".pdb")
+
+    def test_load_and_inspect_success_with_cif_file(self, structure_parser_cls, tmp_path):
+        """
+        Ensure a tuple of list of unique chain_ids and an MMCIF2Dict instance is returned.
+
+        Arrange:
+            Generate an isolated directory with a valid .cif file
+        Act:
+            invoke _load_and_inspect method.
+        Assert:
+            Verify the expected tuple is returned.
+        """
+        structure_dir = tmp_path / "structures"
+        structure_dir.mkdir(parents=True, exist_ok=True)
+
+        mock_cif_path = structure_dir / "test_structure_file.cif"
+        mock_cif_path.write_text(MOCK_CIF_CONTENT, encoding="utf-8")
+
+        test_chains, test_data = structure_parser_cls._load_and_inspect(
+            mock_cif_path, ".cif"
+        )
+
+        assert test_chains == ["A"]
+        # MMCIF2Dict inherits directly from dict
+        assert isinstance(test_data, dict)
+
+    def test_load_and_inspect_with_invalid_cif_error(self, structure_parser_cls, tmp_path):
+        """
+        Verify ValueError is raised when an unparseable .cif file path is passed.
+
+        Arrange:
+            Generate an empty file with a .cif extension.
+        Act:
+            invoke _load_and_inspect method.
+        Assert:
+            Verify a ValueError describing a malformed mmCIF is raised.
+        """
+        structure_dir = tmp_path / "structures"
+        structure_dir.mkdir(parents=True, exist_ok=True)
+
+        mock_cif_path = structure_dir / "test_structure_file.cif"
+        mock_cif_path.write_text("", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="Malformed mmCIF file"):
+            structure_parser_cls._load_and_inspect(mock_cif_path, ".cif")
+
+    def test_load_and_inspect_with_missing_key(self, structure_parser_cls, tmp_path):
+        """
+        Verify ValueError is raised when an essential authorization key is missing from a .cif file.
+
+        Arrange:
+            Generate a .cif file stripping out the standard structural asymmetry key.
+        Act:
+            invoke _load_and_inspect method.
+        Assert:
+            Verify a ValueError highlighting the specific missing key is raised.
+        """
+        structure_dir = tmp_path / "structures"
+        structure_dir.mkdir(parents=True, exist_ok=True)
+
+        mock_cif_path = structure_dir / "test_structure_file.cif"
+        modified_data = MOCK_CIF_CONTENT.replace("_atom_site.auth_asym_id", "")
+        mock_cif_path.write_text(modified_data, encoding="utf-8")
+
+        with pytest.raises(ValueError, match="Missing essential key '_atom_site.auth_asym_id'"):
+            structure_parser_cls._load_and_inspect(mock_cif_path, ".cif")
+
+    def test_parse_legacy_pdb_success(self, structure_parser_cls):
+        """
+        Verify that _parse_legacy_pdb extracts CA coordinates correctly,
+        dynamically handling disordered altloc positions.
+
+        Arrange:
+            Assemble a mock structure containing a single chain, one standard CA atom,
+            and one disordered CA atom with alternative conformations.
+        Act:
+            Invoke the internal legacy PDB parsing loop.
+        Assert:
+            Verify coordinates match standard float formatting allocations.
+        """
+        # Mock standard CA atom
+        mock_atom_1 = MagicMock()
+        mock_atom_1.is_disordered.return_value = False
+        mock_atom_1.get_coord.return_value = [1.0, 2.0, 3.0]
+
+        # Mock a disordered CA atom (simulating an altloc flexible residue)
+        mock_disordered_atom = MagicMock()
+        mock_disordered_atom.is_disordered.return_value = True
+        mock_selected_child = MagicMock()
+        mock_selected_child.get_coord.return_value = [4.0, 5.0, 6.0]
+        mock_disordered_atom.selected_child = mock_selected_child
+
+        # Pack them into residues
+        mock_res_1 = MagicMock()
+        mock_res_1.id = (" ", 1, " ")
+        mock_res_1.__contains__.return_value = True
+        mock_res_1.__getitem__.return_value = mock_atom_1
+
+        mock_res_2 = MagicMock()
+        mock_res_2.id = (" ", 2, " ")
+        mock_res_2.__contains__.return_value = True
+        mock_res_2.__getitem__.return_value = mock_disordered_atom
+
+        # Mock the internal tree layers
+        mock_chain = [mock_res_1, mock_res_2]
+        mock_model = MagicMock()
+        mock_model.__getitem__.return_value = mock_chain
+        mock_structure = MagicMock()
+        mock_structure.__getitem__.return_value = mock_model
+
+        coords = structure_parser_cls._parse_legacy_pdb(mock_structure, "A")
+
+        assert coords.shape == (2, 3)
+        assert coords.dtype == np.float32
+        assert np.array_equal(coords[0], [1.0, 2.0, 3.0])
+        assert np.array_equal(coords[1], [4.0, 5.0, 6.0])
+
+    def test_parse_legacy_pdb_no_ca_atoms_error(self, structure_parser_cls):
+        """
+        Verify ValueError is raised if a chain exists but contains no valid CA atoms.
+        """
+        mock_res = MagicMock()
+        mock_res.id = (" ", 1, " ")
+        mock_res.__contains__.return_value = False  # No CA atom present
+
+        mock_chain = [mock_res]
+        mock_model = MagicMock()
+        mock_model.__getitem__.return_value = mock_chain
+        mock_structure = MagicMock()
+        mock_structure.__getitem__.return_value = mock_model
+
+        with pytest.raises(ValueError, match="No valid Alpha Carbon \\(CA\\) atoms found"):
+            structure_parser_cls._parse_legacy_pdb(mock_structure, "A")
+
+    def test_parse_mmcif_fast_path_success(self, structure_parser_cls):
+        """
+        Ensure _parse_mmcif_fast_path correctly zips and processes flat structural tables.
+        """
+        mock_mmcif_dict = {
+            "_atom_site.label_atom_id": ["CA", "N", "CA", "CA"],
+            "_atom_site.auth_asym_id": ["A", "A", "A", "B"],
+            "_atom_site.group_PDB": ["ATOM", "ATOM", "ATOM", "ATOM"],
+            "_atom_site.Cartn_x": ["10.0", "11.0", "12.0", "20.0"],
+            "_atom_site.Cartn_y": ["20.0", "21.0", "22.0", "30.0"],
+            "_atom_site.Cartn_z": ["30.0", "31.0", "32.0", "40.0"],
+        }
+
+        coords = structure_parser_cls._parse_mmcif_fast_path(
+            mock_mmcif_dict, "A")
+
+        # Should capture row 0 and row 2 (skipping row 1 [N] and row 3 [Chain B])
+        assert coords.shape == (2, 3)
+        assert coords.dtype == np.float32
+        assert np.array_equal(coords[0], [10.0, 20.0, 30.0])
+        assert np.array_equal(coords[1], [12.0, 22.0, 32.0])
+
+    @patch("src.parsers.StructureParser._validate_structure_file")
+    @patch("src.parsers.StructureParser._load_and_inspect")
+    @patch("src.parsers.StructureParser._parse_legacy_pdb")
+    def test_get_alpha_carbon_coordinates_pdb_routing(
+        self, mock_parse_pdb, mock_inspect, mock_validate, structure_parser_cls
+    ):
+        """
+        Verify get_alpha_carbon_coordinates correctly routes .pdb files to the legacy parser.
+        """
+        mock_validate.return_value = ".pdb"
+        mock_struct = MagicMock()
+        mock_inspect.return_value = (["A", "B"], mock_struct)
+
+        expected_coords = np.array([[1.0, 2.0, 3.0]], dtype=np.float32)
+
+        mock_parse_pdb.return_value = expected_coords
+
+        coords = structure_parser_cls.get_alpha_carbon_coordinates(
+            "dummy.pdb", "A")
+
+        assert "A" in coords
+        assert np.array_equal(coords["A"], expected_coords)
+
+        mock_validate.assert_called_once_with("dummy.pdb")
+        mock_inspect.assert_called_once_with(Path("dummy.pdb"), ".pdb")
+        mock_parse_pdb.assert_called_once_with(mock_struct, "A")
+
+    @patch("src.parsers.StructureParser._validate_structure_file")
+    @patch("src.parsers.StructureParser._load_and_inspect")
+    @patch("src.parsers.StructureParser._parse_mmcif_fast_path")
+    def test_get_alpha_carbon_coordinates_cif_routing(
+        self, mock_parse_mmcif, mock_inspect, mock_validate, structure_parser_cls
+    ):
+        """
+        Verify get_alpha_carbon_coordinates correctly routes .cif files to the fast-path parser.
+        """
+        mock_validate.return_value = ".cif"
+        mock_mmcif_dict = MagicMock()
+        mock_inspect.return_value = (["A", "B"], mock_mmcif_dict)
+
+        # 1. Define the raw numerical coordinate array
+        expected_coords = np.array(
+            [[12.345, 23.456, 34.567]], dtype=np.float32)
+
+        # 2. Return the raw array directly from the mock
+        mock_parse_mmcif.return_value = expected_coords
+
+        # Act
+        coords = structure_parser_cls.get_alpha_carbon_coordinates(
+            "dummy.cif", "A")
+
+        # Assert
+        assert "A" in coords
+        assert np.array_equal(coords["A"], expected_coords)
+
+        mock_validate.assert_called_once_with("dummy.cif")
+        mock_inspect.assert_called_once_with(Path("dummy.cif"), ".cif")
+        mock_parse_mmcif.assert_called_once_with(mock_mmcif_dict, "A")
+
+    @patch("src.parsers.StructureParser._validate_structure_file")
+    @patch("src.parsers.StructureParser._load_and_inspect")
+    def test_get_alpha_carbon_coordinates_invalid_chain_error(
+        self, mock_inspect, mock_validate, structure_parser_cls
+    ):
+        """
+        Verify ValueError is raised if the requested chain_id is missing from the file.
+        """
+        mock_validate.return_value = ".pdb"
+        mock_inspect.return_value = (
+            ["B", "C"], MagicMock())  # Chain 'A' is missing
+
+        with pytest.raises(ValueError, match="Requested chain 'A' not found"):
+            structure_parser_cls.get_alpha_carbon_coordinates("dummy.pdb", "A")
