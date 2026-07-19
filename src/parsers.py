@@ -35,7 +35,7 @@ class FastaParser:
         Args:
             file_path (str | Path): File path to the desired FASTA file.
         Returns:
-            sequences (Dict[str, str]): a dictionary mapping header strings to clean sequence strings.
+            sequences (dict[str, str]): A dictionary mapping header strings to clean sequence strings.
         """
         file_path = Path(file_path)
         if not file_path.is_file():
@@ -56,56 +56,64 @@ class FastaParser:
 
                 if line.startswith(">"):
                     if current_header:
-                        sequences[current_header] = "".join(current_sequence)
-                    current_header = line[1:]
+                        raw_sequence = "".join(current_sequence)
+                        sequences[current_header] = cls._validate_amino_acid_sequence(
+                            raw_sequence, current_header
+                        )
+                    current_header = line[1:].strip()
                     current_sequence = []
                 else:
                     if current_header is None:
-                        msg = "Malformed FASTA: Found sequence data before a header."
+                        msg = f"Malformed FASTA in '{file_path.name}': Found sequence data before a header."
                         logger.error(msg)
                         raise ValueError(msg)
                     current_sequence.append(line.upper())
 
             if current_header:
-                sequences[current_header] = "".join(current_sequence)
+                raw_sequence = "".join(current_sequence)
+                sequences[current_header] = cls._validate_amino_acid_sequence(
+                    raw_sequence, current_header
+                )
 
         # --- Post-Parsing Validation ---
         if not sequences:
-            msg = f"Malformed FASTA: File '{file_path.name}' contains no data."
+            msg = f"Malformed FASTA: File '{file_path.name}' contains no entries."
             logger.error(msg)
             raise ValueError(msg)
 
-        for header, seq in sequences.items():
-            if not seq:
-                msg = f"Malformed FASTA: Header '>{header}' has no associated sequence data."
-                logger.error(msg)
-                raise ValueError(msg)
         return sequences
 
     @classmethod
-    def _validate_amino_acid_sequence(cls, sequence: str) -> bool:
+    def _validate_amino_acid_sequence(cls, sequence: str, header: str) -> str:
         """
         Validate all the amino acids in the given sequence are valid.
-        Non-standard amino acids are recorded in the log framework. 
-        """
-        validator_flag = True
-        if not sequence:
-            validator_flag = False
-            logger.error("Empty sequence string was passed.")
-            return validator_flag
+        Non-standard amino acids are recorded in the log framework.
 
-        for i, aa in enumerate(sequence):
+        Args:
+            sequence (str): Amino acid sequence to be validated.
+            header (str): The corresponding fasta header for explicit error tracking.
+        Returns:
+            cleaned_seq (str): Validated amino acid sequence.
+        """
+        cleaned_seq = "".join(sequence.split()).upper()
+
+        if not cleaned_seq:
+            msg = f"Malformed FASTA: Empty sequence string encountered under header '{header}'."
+            logger.error(msg)
+            raise ValueError(msg)
+
+        for i, aa in enumerate(cleaned_seq):
             if aa not in cls.VALID_AA:
-                logger.error(
-                    f"Invalid amino acid '{aa}' found at position {i + 1}")
-                validator_flag = False
-                continue
+                msg = f"Invalid amino acid '{aa}' found at position {i + 1} under header '{header}'."
+                logger.error(msg)
+                raise ValueError(msg)
 
             if aa in cls.NON_STANDARD_AA_SET:
                 logger.warning(
-                    f"Non-standard amino acid '{aa}' found at position {i + 1}")
+                    f"Non-standard amino acid '{aa}' found at position {i + 1} under header '{header}'."
+                )
 
-        return validator_flag
+        return cleaned_seq
 
 
 class StructureParser:
@@ -198,8 +206,8 @@ class StructureParser:
         file_ext = cls._validate_structure_file(file_path)
         path_obj = Path(file_path)
 
-        # 1. Inspect returns the chains AND the already-loaded data structure
-        available_chains, loaded_data = cls._inspect_chains(path_obj, file_ext)
+        # Inspect returns the chains AND the already-loaded data structure
+        available_chains, loaded_data = cls._load_and_inspect(path_obj, file_ext)
         if not available_chains:
             raise ValueError(
                 f"No chains found in structural file '{path_obj.name}'")
@@ -280,7 +288,7 @@ class StructureParser:
         required_keys = [
             "_atom_site.group_PDB",
             "_atom_site.auth_asym_id",
-            "_atom_site.auth_atom_id",
+            "_atom_site.label_atom_id",  
             "_atom_site.Cartn_x",
             "_atom_site.Cartn_y",
             "_atom_site.Cartn_z",
@@ -298,7 +306,7 @@ class StructureParser:
         for group, chain, atom_name, x, y, z in zip(
             mmcif_dict["_atom_site.group_PDB"],
             mmcif_dict["_atom_site.auth_asym_id"],
-            mmcif_dict["_atom_site.auth_atom_id"],
+            mmcif_dict["_atom_site.label_atom_id"],
             mmcif_dict["_atom_site.Cartn_x"],
             mmcif_dict["_atom_site.Cartn_y"],
             mmcif_dict["_atom_site.Cartn_z"],
