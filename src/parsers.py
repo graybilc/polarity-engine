@@ -207,7 +207,8 @@ class StructureParser:
         path_obj = Path(file_path)
 
         # Inspect returns the chains AND the already-loaded data structure
-        available_chains, loaded_data = cls._load_and_inspect(path_obj, file_ext)
+        available_chains, loaded_data = cls._load_and_inspect(
+            path_obj, file_ext)
         if not available_chains:
             raise ValueError(
                 f"No chains found in structural file '{path_obj.name}'")
@@ -240,19 +241,24 @@ class StructureParser:
         return results
 
     @classmethod
-    def _parse_legacy_pdb(cls, structure: Structure, chain_id: str) -> np.ndarray:
+    def _parse_legacy_pdb(
+        cls, structure: Structure, chain_id: str
+    ) -> dict[str, dict[str, np.ndarray]]:
         """
-        Extracts CA coordinates directly from a pre-loaded Biopython Structure.
+        Extracts CA coordinates, B-factors, and occupancy values directly from 
+        a pre-loaded Biopython Structure object.
 
         Args:
-            structure (Structure): Pre-loaded Biopython Structure object for the target protein.
-            chain_id (str): Name used for the distinct, covalently linked macromolecule in the structure file.    
+            structure (Structure): Pre-loaded Biopython Structure object.
+            chain_id (str): Target chain identifier.
+
         Returns:
-            np.ndarray: CA coordinates in the specified chain.
+            dict[str, dict[str, np.ndarray]]: Dictionary mapping chain_id to 
+            arrays for 'coords', 'b_factors', and 'occupancies'.
         """
         model = structure[0]
         chain = model[chain_id]
-        ca_coordinates = []
+        ca_coordinates, b_factors, occupancies = [], [], []
 
         for residue in chain:
             # Skip heteroatoms/water and verify CA exists
@@ -264,16 +270,26 @@ class StructureParser:
                     atom = atom.selected_child
 
                 ca_coordinates.append(atom.get_coord())
+                b_factors.append(atom.get_bfactor())
+                occupancies.append(atom.get_occupancy())
 
         if not ca_coordinates:
             raise ValueError(
                 f"No valid Alpha Carbon (CA) atoms found for chain '{chain_id}'"
             )
 
-        return np.array(ca_coordinates, dtype=np.float32)
+        return {
+            chain_id: {
+                "coords": np.array(ca_coordinates, dtype=np.float32),
+                "b_factors": np.array(b_factors, dtype=np.float32),
+                "occupancies": np.array(occupancies, dtype=np.float32),
+            }
+        }
 
     @classmethod
-    def _parse_mmcif_fast_path(cls, mmcif_dict: dict, chain_id: str) -> np.ndarray:
+    def _parse_mmcif_fast_path(
+        cls, mmcif_dict: dict, chain_id: str
+    ) -> dict[str, dict[str, np.ndarray]]:
         """
         Parses mmCIF coordinates from a pre-loaded MMCIF2Dict by extracting 
         Alpha Carbon (CA) positions directly from the internal arrays.
@@ -282,16 +298,18 @@ class StructureParser:
             mmcif_dict (dict): MMCIF2Dict object for the target project.
             chain_id (str): Name used for the distinct, covalently linked macromolecule in the structure file.
         Returns:
-            np.ndarray: CA coordinates in the specified chain.
+            chain_data (dict[str, np.ndarray]): dict with chain_id as the key and CA coordinates, B-factor, 
+            and Occupancy in the specified chain.
         """
-        # Check for essential structural data keys
         required_keys = [
             "_atom_site.group_PDB",
             "_atom_site.auth_asym_id",
-            "_atom_site.label_atom_id",  
+            "_atom_site.label_atom_id",
             "_atom_site.Cartn_x",
             "_atom_site.Cartn_y",
             "_atom_site.Cartn_z",
+            "_atom_site.B_iso_or_equiv",  # B-factor / local resolution proxy
+            "_atom_site.occupancy",        # Occupancy fraction
         ]
 
         for key in required_keys:
@@ -300,21 +318,32 @@ class StructureParser:
                 logger.error(msg)
                 raise ValueError(msg)
 
-        ca_coordinates = []
+        # Normalize single-element string values into lists for safe zipping
+        cols = {
+            k: [mmcif_dict[k]] if isinstance(
+                mmcif_dict[k], str) else mmcif_dict[k]
+            for k in required_keys
+        }
+
+        ca_coordinates, b_factors, occupancies = [], [], []
 
         # Parallel iteration over the coordinate columns
-        for group, chain, atom_name, x, y, z in zip(
-            mmcif_dict["_atom_site.group_PDB"],
-            mmcif_dict["_atom_site.auth_asym_id"],
-            mmcif_dict["_atom_site.label_atom_id"],
-            mmcif_dict["_atom_site.Cartn_x"],
-            mmcif_dict["_atom_site.Cartn_y"],
-            mmcif_dict["_atom_site.Cartn_z"],
+        for group, chain, atom_name, x, y, z, b_val, occ_val in zip(
+            cols["_atom_site.group_PDB"],
+            cols["_atom_site.auth_asym_id"],
+            cols["_atom_site.label_atom_id"],
+            cols["_atom_site.Cartn_x"],
+            cols["_atom_site.Cartn_y"],
+            cols["_atom_site.Cartn_z"],
+            cols["_atom_site.B_iso_or_equiv"],
+            cols["_atom_site.occupancy"],
         ):
             # Isolate standard polymer atoms (ATOM), the target chain, and Alpha Carbons (CA)
             if group == "ATOM" and chain == chain_id and atom_name == "CA":
                 try:
                     ca_coordinates.append([float(x), float(y), float(z)])
+                    b_factors.append(float(b_val))
+                    occupancies.append(float(occ_val))
                 except ValueError as e:
                     msg = f"Non-numeric spatial coordinates encountered in mmCIF dictionary: {e}"
                     logger.error(msg)
@@ -322,9 +351,16 @@ class StructureParser:
 
         if not ca_coordinates:
             raise ValueError(
-                f"No valid Alpha Carbon (CA) atoms found for chain '{chain_id}'")
+                f"No valid Alpha Carbon (CA) atoms found for chain '{chain_id}'"
+            )
 
-        return np.array(ca_coordinates, dtype=np.float32)
+        return {
+            chain_id: {
+                "coords": np.array(ca_coordinates, dtype=np.float32),
+                "b_factors": np.array(b_factors, dtype=np.float32),
+                "occupancies": np.array(occupancies, dtype=np.float32),
+            }
+        }
 
 # def main(args_list: Sequence[str] | None = None) -> None:
 #     pass

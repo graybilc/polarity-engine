@@ -454,30 +454,36 @@ class TestStructureParser:
 
     def test_parse_legacy_pdb_success(self, structure_parser_cls):
         """
-        Verify that _parse_legacy_pdb extracts CA coordinates correctly,
-        dynamically handling disordered altloc positions.
-
         Arrange:
-            Assemble a mock structure containing a single chain, one standard CA atom,
-            and one disordered CA atom with alternative conformations.
+            Assemble a mock Biopython Structure containing a single chain with 
+            one standard CA atom and one disordered CA atom with an altloc.
         Act:
-            Invoke the internal legacy PDB parsing loop.
+            Invoke _parse_legacy_pdb for target chain 'A'.
         Assert:
-            Verify coordinates match standard float formatting allocations.
+            Verify that CA coordinates, B-factors, and occupancies are correctly 
+            extracted, handling disordered child selection, and returned in the 
+            nested dictionary structure under key 'A'.
         """
+        target_chain = "A"
+
         # Mock standard CA atom
         mock_atom_1 = MagicMock()
         mock_atom_1.is_disordered.return_value = False
         mock_atom_1.get_coord.return_value = [1.0, 2.0, 3.0]
+        mock_atom_1.get_bfactor.return_value = 15.5
+        mock_atom_1.get_occupancy.return_value = 1.0
 
-        # Mock a disordered CA atom (simulating an altloc flexible residue)
-        mock_disordered_atom = MagicMock()
-        mock_disordered_atom.is_disordered.return_value = True
+        # Mock disordered CA atom (simulating an altloc flexible residue)
         mock_selected_child = MagicMock()
         mock_selected_child.get_coord.return_value = [4.0, 5.0, 6.0]
+        mock_selected_child.get_bfactor.return_value = 22.1
+        mock_selected_child.get_occupancy.return_value = 0.50
+
+        mock_disordered_atom = MagicMock()
+        mock_disordered_atom.is_disordered.return_value = True
         mock_disordered_atom.selected_child = mock_selected_child
 
-        # Pack them into residues
+        # Pack atoms into residues
         mock_res_1 = MagicMock()
         mock_res_1.id = (" ", 1, " ")
         mock_res_1.__contains__.return_value = True
@@ -495,12 +501,26 @@ class TestStructureParser:
         mock_structure = MagicMock()
         mock_structure.__getitem__.return_value = mock_model
 
-        coords = structure_parser_cls._parse_legacy_pdb(mock_structure, "A")
+        expected_coords = np.array(
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
+        expected_b_factors = np.array([15.5, 22.1], dtype=np.float32)
+        expected_occupancies = np.array([1.0, 0.50], dtype=np.float32)
 
-        assert coords.shape == (2, 3)
-        assert coords.dtype == np.float32
-        assert np.array_equal(coords[0], [1.0, 2.0, 3.0])
-        assert np.array_equal(coords[1], [4.0, 5.0, 6.0])
+        result = structure_parser_cls._parse_legacy_pdb(
+            mock_structure, target_chain)
+
+        assert target_chain in result
+        chain_data = result[target_chain]
+
+        assert chain_data["coords"].shape == (2, 3)
+        assert chain_data["coords"].dtype == np.float32
+        assert np.array_equal(chain_data["coords"], expected_coords)
+
+        assert chain_data["b_factors"].dtype == np.float32
+        assert np.array_equal(chain_data["b_factors"], expected_b_factors)
+
+        assert chain_data["occupancies"].dtype == np.float32
+        assert np.array_equal(chain_data["occupancies"], expected_occupancies)
 
     def test_parse_legacy_pdb_no_ca_atoms_error(self, structure_parser_cls):
         """
@@ -521,8 +541,17 @@ class TestStructureParser:
 
     def test_parse_mmcif_fast_path_success(self, structure_parser_cls):
         """
-        Ensure _parse_mmcif_fast_path correctly zips and processes flat structural tables.
+        Arrange:
+            Construct a mock mmCIF dictionary containing standard polymer atoms,
+            non-CA backbone atoms, multiple chains, B-factors, and occupancy values.
+        Act: 
+            Call _parse_mmcif_fast_path for target chain 'A'.
+        Assert:
+            Verify that non-CA atoms and off-target chains are filtered out, and 
+            that spatial coordinates, b-factors, and occupancies are parsed into 
+            the correct float32 NumPy arrays under the chain key.
         """
+        target_chain = "A"
         mock_mmcif_dict = {
             "_atom_site.label_atom_id": ["CA", "N", "CA", "CA"],
             "_atom_site.auth_asym_id": ["A", "A", "A", "B"],
@@ -530,16 +559,32 @@ class TestStructureParser:
             "_atom_site.Cartn_x": ["10.0", "11.0", "12.0", "20.0"],
             "_atom_site.Cartn_y": ["20.0", "21.0", "22.0", "30.0"],
             "_atom_site.Cartn_z": ["30.0", "31.0", "32.0", "40.0"],
+            "_atom_site.B_iso_or_equiv": ["15.5", "18.2", "16.0", "22.1"],
+            "_atom_site.occupancy": ["1.0", "1.0", "0.85", "1.0"],
         }
 
-        coords = structure_parser_cls._parse_mmcif_fast_path(
-            mock_mmcif_dict, "A")
+        expected_coords = np.array(
+            [[10.0, 20.0, 30.0], [12.0, 22.0, 32.0]], dtype=np.float32
+        )
+        expected_b_factors = np.array([15.5, 16.0], dtype=np.float32)
+        expected_occupancies = np.array([1.0, 0.85], dtype=np.float32)
 
-        # Should capture row 0 and row 2 (skipping row 1 [N] and row 3 [Chain B])
-        assert coords.shape == (2, 3)
-        assert coords.dtype == np.float32
-        assert np.array_equal(coords[0], [10.0, 20.0, 30.0])
-        assert np.array_equal(coords[1], [12.0, 22.0, 32.0])
+        result = structure_parser_cls._parse_mmcif_fast_path(
+            mock_mmcif_dict, target_chain
+        )
+
+        assert target_chain in result
+        chain_data = result[target_chain]
+
+        assert chain_data["coords"].shape == (2, 3)
+        assert chain_data["coords"].dtype == np.float32
+        assert np.array_equal(chain_data["coords"], expected_coords)
+
+        assert chain_data["b_factors"].dtype == np.float32
+        assert np.array_equal(chain_data["b_factors"], expected_b_factors)
+
+        assert chain_data["occupancies"].dtype == np.float32
+        assert np.array_equal(chain_data["occupancies"], expected_occupancies)
 
     @patch("src.parsers.StructureParser._validate_structure_file")
     @patch("src.parsers.StructureParser._load_and_inspect")
@@ -548,25 +593,43 @@ class TestStructureParser:
         self, mock_parse_pdb, mock_inspect, mock_validate, structure_parser_cls
     ):
         """
-        Verify get_alpha_carbon_coordinates correctly routes .pdb files to the legacy parser.
+        Arrange: 
+            Configure file validation to return '.pdb' extension, mock structure inspection,
+            and define mock parser return dictionary containing spatial coordinates, 
+            B-factors, and occupancies.
+        Act:
+            Call get_alpha_carbon_coordinates requesting specific chain 'A'.
+        Assert:
+            Verify that validation, inspection, and legacy PDB parsing are invoked with 
+            correct parameters, and that the target chain payload is returned.
         """
+        target_chain = "A"
         mock_validate.return_value = ".pdb"
         mock_struct = MagicMock()
         mock_inspect.return_value = (["A", "B"], mock_struct)
 
-        expected_coords = np.array([[1.0, 2.0, 3.0]], dtype=np.float32)
+        expected_payload = {
+            "coords": np.array([[1.0, 2.0, 3.0]], dtype=np.float32),
+            "b_factors": np.array([15.5], dtype=np.float32),
+            "occupancies": np.array([1.0], dtype=np.float32),
+        }
 
-        mock_parse_pdb.return_value = expected_coords
+        mock_parse_pdb.return_value = expected_payload
 
-        coords = structure_parser_cls.get_alpha_carbon_coordinates(
-            "dummy.pdb", "A")
+        result = structure_parser_cls.get_alpha_carbon_coordinates(
+            "dummy.pdb", target_chain)
 
-        assert "A" in coords
-        assert np.array_equal(coords["A"], expected_coords)
+        assert target_chain in result
+        chain_data = result[target_chain]
+        assert np.array_equal(chain_data["coords"], expected_payload["coords"])
+        assert np.array_equal(
+            chain_data["b_factors"], expected_payload["b_factors"])
+        assert np.array_equal(
+            chain_data["occupancies"], expected_payload["occupancies"])
 
         mock_validate.assert_called_once_with("dummy.pdb")
         mock_inspect.assert_called_once_with(Path("dummy.pdb"), ".pdb")
-        mock_parse_pdb.assert_called_once_with(mock_struct, "A")
+        mock_parse_pdb.assert_called_once_with(mock_struct, target_chain)
 
     @patch("src.parsers.StructureParser._validate_structure_file")
     @patch("src.parsers.StructureParser._load_and_inspect")
@@ -575,30 +638,42 @@ class TestStructureParser:
         self, mock_parse_mmcif, mock_inspect, mock_validate, structure_parser_cls
     ):
         """
-        Verify get_alpha_carbon_coordinates correctly routes .cif files to the fast-path parser.
+        Arrange:
+            Configure file validation to return '.cif' extension, mock structure inspection,
+            and define mock mmCIF parser return dictionary containing spatial coordinates, 
+            B-factors, and occupancies for chain 'A'.
+        Act:
+            Call get_alpha_carbon_coordinates requesting specific chain 'A'.
+        Assert:
+            Verify that validation, inspection, and fast-path mmCIF parsing are invoked 
+            with correct parameters, and that the target chain payload is returned.
         """
+        target_chain = "A"
         mock_validate.return_value = ".cif"
         mock_mmcif_dict = MagicMock()
         mock_inspect.return_value = (["A", "B"], mock_mmcif_dict)
 
-        # 1. Define the raw numerical coordinate array
-        expected_coords = np.array(
-            [[12.345, 23.456, 34.567]], dtype=np.float32)
+        expected_payload = {
+            "coords": np.array([[12.345, 23.456, 34.567]], dtype=np.float32),
+            "b_factors": np.array([22.1], dtype=np.float32),
+            "occupancies": np.array([0.85], dtype=np.float32),
+        }
+        mock_parse_mmcif.return_value = expected_payload
 
-        # 2. Return the raw array directly from the mock
-        mock_parse_mmcif.return_value = expected_coords
+        result = structure_parser_cls.get_alpha_carbon_coordinates(
+            "dummy.cif", target_chain)
 
-        # Act
-        coords = structure_parser_cls.get_alpha_carbon_coordinates(
-            "dummy.cif", "A")
-
-        # Assert
-        assert "A" in coords
-        assert np.array_equal(coords["A"], expected_coords)
+        assert target_chain in result
+        chain_data = result[target_chain]
+        assert np.array_equal(chain_data["coords"], expected_payload["coords"])
+        assert np.array_equal(
+            chain_data["b_factors"], expected_payload["b_factors"])
+        assert np.array_equal(
+            chain_data["occupancies"], expected_payload["occupancies"])
 
         mock_validate.assert_called_once_with("dummy.cif")
         mock_inspect.assert_called_once_with(Path("dummy.cif"), ".cif")
-        mock_parse_mmcif.assert_called_once_with(mock_mmcif_dict, "A")
+        mock_parse_mmcif.assert_called_once_with(mock_mmcif_dict, target_chain)
 
     @patch("src.parsers.StructureParser._validate_structure_file")
     @patch("src.parsers.StructureParser._load_and_inspect")
@@ -606,11 +681,18 @@ class TestStructureParser:
         self, mock_inspect, mock_validate, structure_parser_cls
     ):
         """
-        Verify ValueError is raised if the requested chain_id is missing from the file.
+        Arrange:
+            Configure mock structure inspection to return available chains ['B', 'C'], 
+            omitting the requested chain 'A'.
+        Act:
+            Invoke get_alpha_carbon_coordinates requesting chain 'A'.
+        Assert:
+            Verify that a ValueError is raised with a message identifying the missing chain.
         """
+        requested_chain = "A"
         mock_validate.return_value = ".pdb"
-        mock_inspect.return_value = (
-            ["B", "C"], MagicMock())  # Chain 'A' is missing
+        mock_inspect.return_value = (["B", "C"], MagicMock())
 
-        with pytest.raises(ValueError, match="Requested chain 'A' not found"):
-            structure_parser_cls.get_alpha_carbon_coordinates("dummy.pdb", "A")
+        with pytest.raises(ValueError, match=f"Requested chain '{requested_chain}' not found"):
+            structure_parser_cls.get_alpha_carbon_coordinates(
+                "dummy.pdb", requested_chain)
