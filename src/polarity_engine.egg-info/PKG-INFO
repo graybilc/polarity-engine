@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: polarity_engine
+Version: 0.1.0
+Summary: Environment to build an isolated, runtime-enforced feature extraction engine that processes the multi-chain geometry of the 8R3Y complex and generates dense evolutionary representations
+Requires-Python: >=3.13
+Description-Content-Type: text/markdown
+Requires-Dist: biopython>=1.87
+Requires-Dist: numpy>=2.5.0
+Requires-Dist: requests>=2.34.2
+Requires-Dist: tqdm>=4.68.3
