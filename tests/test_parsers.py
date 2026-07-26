@@ -9,7 +9,7 @@ from Bio.PDB.Structure import Structure
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from src.parsers import FastaParser, StructureParser
+from polarity_engine.parsers import FastaParser, StructureParser
 from tests.mock_data import MOCK_LGL_FASTA_CONTENT, MOCK_APKC_FASTA_CONTENT, MOCK_PDB_CONTENT_1, MOCK_CIF_CONTENT
 
 
@@ -354,7 +354,7 @@ class TestStructureParser:
         mock_structure.__getitem__.return_value = mock_model_0
 
         # Patch the PDBParser instance method directly to avoid filesystem checks
-        with patch("src.parsers.PDBParser.get_structure", return_value=mock_structure):
+        with patch("polarity_engine.parsers.PDBParser.get_structure", return_value=mock_structure):
             with caplog.at_level(logging.WARNING, logger="src.parsers"):
                 chains, struct = structure_parser_cls._load_and_inspect(
                     file_path, file_ext
@@ -509,18 +509,16 @@ class TestStructureParser:
         result = structure_parser_cls._parse_legacy_pdb(
             mock_structure, target_chain)
 
-        assert target_chain in result
-        chain_data = result[target_chain]
 
-        assert chain_data["coords"].shape == (2, 3)
-        assert chain_data["coords"].dtype == np.float32
-        assert np.array_equal(chain_data["coords"], expected_coords)
+        assert result["coords"].shape == (2, 3)
+        assert result["coords"].dtype == np.float32
+        assert np.array_equal(result["coords"], expected_coords)
 
-        assert chain_data["b_factors"].dtype == np.float32
-        assert np.array_equal(chain_data["b_factors"], expected_b_factors)
+        assert result["b_factors"].dtype == np.float32
+        assert np.array_equal(result["b_factors"], expected_b_factors)
 
-        assert chain_data["occupancies"].dtype == np.float32
-        assert np.array_equal(chain_data["occupancies"], expected_occupancies)
+        assert result["occupancies"].dtype == np.float32
+        assert np.array_equal(result["occupancies"], expected_occupancies)
 
     def test_parse_legacy_pdb_no_ca_atoms_error(self, structure_parser_cls):
         """
@@ -573,22 +571,22 @@ class TestStructureParser:
             mock_mmcif_dict, target_chain
         )
 
-        assert target_chain in result
-        chain_data = result[target_chain]
+        assert "coords" in result
+        assert "b_factors" in result
 
-        assert chain_data["coords"].shape == (2, 3)
-        assert chain_data["coords"].dtype == np.float32
-        assert np.array_equal(chain_data["coords"], expected_coords)
+        assert result["coords"].shape == (2, 3)
+        assert result["coords"].dtype == np.float32
+        assert np.array_equal(result["coords"], expected_coords)
 
-        assert chain_data["b_factors"].dtype == np.float32
-        assert np.array_equal(chain_data["b_factors"], expected_b_factors)
+        assert result["b_factors"].dtype == np.float32
+        assert np.array_equal(result["b_factors"], expected_b_factors)
 
-        assert chain_data["occupancies"].dtype == np.float32
-        assert np.array_equal(chain_data["occupancies"], expected_occupancies)
+        assert result["occupancies"].dtype == np.float32
+        assert np.array_equal(result["occupancies"], expected_occupancies)
 
-    @patch("src.parsers.StructureParser._validate_structure_file")
-    @patch("src.parsers.StructureParser._load_and_inspect")
-    @patch("src.parsers.StructureParser._parse_legacy_pdb")
+    @patch("polarity_engine.parsers.StructureParser._validate_structure_file")
+    @patch("polarity_engine.parsers.StructureParser._load_and_inspect")
+    @patch("polarity_engine.parsers.StructureParser._parse_legacy_pdb")
     def test_get_alpha_carbon_coordinates_pdb_routing(
         self, mock_parse_pdb, mock_inspect, mock_validate, structure_parser_cls
     ):
@@ -619,21 +617,22 @@ class TestStructureParser:
         result = structure_parser_cls.get_alpha_carbon_coordinates(
             "dummy.pdb", target_chain)
 
-        assert target_chain in result
-        chain_data = result[target_chain]
-        assert np.array_equal(chain_data["coords"], expected_payload["coords"])
+        assert "coords" in result[target_chain]
+        assert "b_factors" in result[target_chain]
+
+        assert np.array_equal(result[target_chain]["coords"], expected_payload["coords"])
         assert np.array_equal(
-            chain_data["b_factors"], expected_payload["b_factors"])
+            result[target_chain]["b_factors"], expected_payload["b_factors"])
         assert np.array_equal(
-            chain_data["occupancies"], expected_payload["occupancies"])
+            result[target_chain]["occupancies"], expected_payload["occupancies"])
 
         mock_validate.assert_called_once_with("dummy.pdb")
         mock_inspect.assert_called_once_with(Path("dummy.pdb"), ".pdb")
         mock_parse_pdb.assert_called_once_with(mock_struct, target_chain)
 
-    @patch("src.parsers.StructureParser._validate_structure_file")
-    @patch("src.parsers.StructureParser._load_and_inspect")
-    @patch("src.parsers.StructureParser._parse_mmcif_fast_path")
+    @patch("polarity_engine.parsers.StructureParser._validate_structure_file")
+    @patch("polarity_engine.parsers.StructureParser._load_and_inspect")
+    @patch("polarity_engine.parsers.StructureParser._parse_mmcif_fast_path")
     def test_get_alpha_carbon_coordinates_cif_routing(
         self, mock_parse_mmcif, mock_inspect, mock_validate, structure_parser_cls
     ):
@@ -663,20 +662,21 @@ class TestStructureParser:
         result = structure_parser_cls.get_alpha_carbon_coordinates(
             "dummy.cif", target_chain)
 
-        assert target_chain in result
-        chain_data = result[target_chain]
-        assert np.array_equal(chain_data["coords"], expected_payload["coords"])
+        assert "coords" in result[target_chain]
+        assert "b_factors" in result[target_chain]
+
+        assert np.array_equal(result[target_chain]["coords"], expected_payload["coords"])
         assert np.array_equal(
-            chain_data["b_factors"], expected_payload["b_factors"])
+            result[target_chain]["b_factors"], expected_payload["b_factors"])
         assert np.array_equal(
-            chain_data["occupancies"], expected_payload["occupancies"])
+            result[target_chain]["occupancies"], expected_payload["occupancies"])
 
         mock_validate.assert_called_once_with("dummy.cif")
         mock_inspect.assert_called_once_with(Path("dummy.cif"), ".cif")
         mock_parse_mmcif.assert_called_once_with(mock_mmcif_dict, target_chain)
 
-    @patch("src.parsers.StructureParser._validate_structure_file")
-    @patch("src.parsers.StructureParser._load_and_inspect")
+    @patch("polarity_engine.parsers.StructureParser._validate_structure_file")
+    @patch("polarity_engine.parsers.StructureParser._load_and_inspect")
     def test_get_alpha_carbon_coordinates_invalid_chain_error(
         self, mock_inspect, mock_validate, structure_parser_cls
     ):

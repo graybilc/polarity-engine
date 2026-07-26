@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 from urllib.error import URLError
 
-from src.fetch_data import ProteinDataIngestor, parse_arguments, main
+from polarity_engine.fetch_data import ProteinDataIngestor, parse_arguments, main
 from tests.mock_data import UNIPROT_ID, TARGET_NAME, MOCK_LGL_FASTA_CONTENT
 
 @pytest.fixture
@@ -350,7 +350,7 @@ class TestMain:
         main() dynamically treats download_all as True and fires all pipeline steps.
         """
         mock_ingestor_class = mocker.patch(
-            "src.fetch_data.ProteinDataIngestor")
+            "polarity_engine.fetch_data.ProteinDataIngestor")
         mock_instance = mock_ingestor_class.return_value
 
         mock_fasta = mocker.patch.object(mock_instance, "fetch_fasta")
@@ -377,7 +377,7 @@ class TestMain:
         main() fires only fetch_fasta and fetch_cif.
         """
         mock_ingestor_class = mocker.patch(
-            "src.fetch_data.ProteinDataIngestor")
+            "polarity_engine.fetch_data.ProteinDataIngestor")
         mock_instance = mock_ingestor_class.return_value
 
         mock_fasta = mocker.patch.object(mock_instance, "fetch_fasta")
@@ -405,7 +405,7 @@ class TestMain:
         main() fires only fetch_fasta and fetch_cif.
         """
         mock_ingestor_class = mocker.patch(
-            "src.fetch_data.ProteinDataIngestor")
+            "polarity_engine.fetch_data.ProteinDataIngestor")
         mock_instance = mock_ingestor_class.return_value
 
         mock_fasta = mocker.patch.object(mock_instance, "fetch_fasta")
