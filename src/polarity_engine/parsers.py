@@ -20,6 +20,7 @@ class FastaParser:
     """
     Parses and validates FASTA sequence files from scratch.
     """
+
     STANDARD_AA = "ACDEFGHIKLMNPQRSTVWY"
     NON_STANDARD_AA = "UOBZXJ*"
 
@@ -121,14 +122,15 @@ class StructureParser:
     Parses protein structure files (PDB/mmCIF) to extract 3D coordinates.
 
     Design Note:
-        For mmCIF parsing, we deliberately bypass Biopython's full SMCRA 
-        (Structure/Model/Chain/Residue/Atom) object tree representation 
-        (via MMCIFParser) in favor of the lower-level MMCIF2Dict representation. 
-        This avoids heavy Python object instantiation overhead, achieving a 
+        For mmCIF parsing, we deliberately bypass Biopython's full SMCRA
+        (Structure/Model/Chain/Residue/Atom) object tree representation
+        (via MMCIFParser) in favor of the lower-level MMCIF2Dict representation.
+        This avoids heavy Python object instantiation overhead, achieving a
         high-speed array-extraction "fast path" suitable for deep learning pipelines.
         For PDB parsing, we will use Biopython's standard PDBParser since the SMCRA
         overhead are unlikely to bottleneck us.
     """
+
     @classmethod
     def _validate_structure_file(cls, file_path: str | Path) -> str:
         """
@@ -151,27 +153,30 @@ class StructureParser:
     @classmethod
     def _load_and_inspect(cls, file_path: Path, file_ext: str) -> tuple[list[str], any]:
         """
-        Loads the structure file and extracts unique chain IDs alongside 
+        Loads the structure file and extracts unique chain IDs alongside
         the raw parsed data object.
 
         Args:
             file_path (Path): File path to the desired structure file.
             file_ext (str): Lowercased extension of the structure file.
         Returns:
-            tuple[list[str], any]: A list of unique chain IDs, and the loaded data 
+            tuple[list[str], any]: A list of unique chain IDs, and the loaded data
                 object (Structure or MMCIF2Dict).
         """
         if file_ext == ".pdb":
             try:
                 structure = PDBParser(QUIET=True).get_structure(
-                    file_path.stem, str(file_path))
+                    file_path.stem, str(file_path)
+                )
                 if len(structure) > 1:
                     logger.warning(
-                        f"File '{file_path.name}' contains {len(structure)} models. Defaulting to Model 0.")
+                        f"File '{file_path.name}' contains {len(structure)} models. Defaulting to Model 0."
+                    )
                 return list(structure[0].child_dict.keys()), structure
             except Exception as e:
                 raise ValueError(
-                    f"Malformed PDB file structure in '{file_path.name}': {e}")
+                    f"Malformed PDB file structure in '{file_path.name}': {e}"
+                )
 
         elif file_ext in (".cif", ".mmcif"):
             try:
@@ -181,12 +186,10 @@ class StructureParser:
                     raise ValueError(f"Missing essential key '{key}'")
 
                 seen = set()
-                chains = [c for c in mmcif_dict[key]
-                          if not (c in seen or seen.add(c))]
+                chains = [c for c in mmcif_dict[key] if not (c in seen or seen.add(c))]
                 return chains, mmcif_dict
             except Exception as e:
-                raise ValueError(
-                    f"Malformed mmCIF file in '{file_path.name}': {e}")
+                raise ValueError(f"Malformed mmCIF file in '{file_path.name}': {e}")
 
         return [], None
 
@@ -201,30 +204,27 @@ class StructureParser:
             file_path (str | Path): File path to the desired structure file.
             chain_id (str): name used for the distinct, covalently linked macromolecule in the structure file.
         Returns:
-            results (dict[str, np.ndarray]): dict with chain_id as the key and loaded data as value 
+            results (dict[str, np.ndarray]): dict with chain_id as the key and loaded data as value
         """
         file_ext = cls._validate_structure_file(file_path)
         path_obj = Path(file_path)
 
         # Inspect returns the chains AND the already-loaded data structure
-        available_chains, loaded_data = cls._load_and_inspect(
-            path_obj, file_ext)
+        available_chains, loaded_data = cls._load_and_inspect(path_obj, file_ext)
         if not available_chains:
-            raise ValueError(
-                f"No chains found in structural file '{path_obj.name}'")
+            raise ValueError(f"No chains found in structural file '{path_obj.name}'")
 
         results = {}
         if chain_id is not None:
             if chain_id not in available_chains:
                 raise ValueError(
-                    f"Requested chain '{chain_id}' not found in {available_chains}")
+                    f"Requested chain '{chain_id}' not found in {available_chains}"
+                )
 
             if file_ext == ".pdb":
-                results[chain_id] = cls._parse_legacy_pdb(
-                    loaded_data, chain_id)
+                results[chain_id] = cls._parse_legacy_pdb(loaded_data, chain_id)
             else:
-                results[chain_id] = cls._parse_mmcif_fast_path(
-                    loaded_data, chain_id)
+                results[chain_id] = cls._parse_mmcif_fast_path(loaded_data, chain_id)
             return results
 
         # Dynamic multi-chain collection using the same loaded_data
@@ -233,8 +233,7 @@ class StructureParser:
                 if file_ext == ".pdb":
                     results[c_id] = cls._parse_legacy_pdb(loaded_data, c_id)
                 else:
-                    results[c_id] = cls._parse_mmcif_fast_path(
-                        loaded_data, c_id)
+                    results[c_id] = cls._parse_mmcif_fast_path(loaded_data, c_id)
             except ValueError:
                 continue
 
@@ -245,7 +244,7 @@ class StructureParser:
         cls, structure: Structure, chain_id: str
     ) -> dict[str, dict[str, np.ndarray]]:
         """
-        Extracts CA coordinates, B-factors, and occupancy values directly from 
+        Extracts CA coordinates, B-factors, and occupancy values directly from
         a pre-loaded Biopython Structure object.
 
         Args:
@@ -253,7 +252,7 @@ class StructureParser:
             chain_id (str): Target chain identifier.
 
         Returns:
-            dict[str, dict[str, np.ndarray]]: Dictionary mapping chain_id to 
+            dict[str, dict[str, np.ndarray]]: Dictionary mapping chain_id to
             arrays for 'coords', 'b_factors', and 'occupancies'.
         """
         model = structure[0]
@@ -289,14 +288,14 @@ class StructureParser:
         cls, mmcif_dict: dict, chain_id: str
     ) -> dict[str, dict[str, np.ndarray]]:
         """
-        Parses mmCIF coordinates from a pre-loaded MMCIF2Dict by extracting 
+        Parses mmCIF coordinates from a pre-loaded MMCIF2Dict by extracting
         Alpha Carbon (CA) positions directly from the internal arrays.
 
         Args:
             mmcif_dict (dict): MMCIF2Dict object for the target project.
             chain_id (str): Name used for the distinct, covalently linked macromolecule in the structure file.
         Returns:
-            chain_data (dict[str, np.ndarray]): dict with chain_id as the key and CA coordinates, B-factor, 
+            chain_data (dict[str, np.ndarray]): dict with chain_id as the key and CA coordinates, B-factor,
             and Occupancy in the specified chain.
         """
         required_keys = [
@@ -307,7 +306,7 @@ class StructureParser:
             "_atom_site.Cartn_y",
             "_atom_site.Cartn_z",
             "_atom_site.B_iso_or_equiv",  # B-factor / local resolution proxy
-            "_atom_site.occupancy",        # Occupancy fraction
+            "_atom_site.occupancy",  # Occupancy fraction
         ]
 
         for key in required_keys:
@@ -318,8 +317,7 @@ class StructureParser:
 
         # Normalize single-element string values into lists for safe zipping
         cols = {
-            k: [mmcif_dict[k]] if isinstance(
-                mmcif_dict[k], str) else mmcif_dict[k]
+            k: [mmcif_dict[k]] if isinstance(mmcif_dict[k], str) else mmcif_dict[k]
             for k in required_keys
         }
 

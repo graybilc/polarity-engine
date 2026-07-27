@@ -13,6 +13,7 @@ from urllib.error import URLError
 from polarity_engine.fetch_data import ProteinDataIngestor, parse_arguments, main
 from tests.mock_data import UNIPROT_ID, TARGET_NAME, MOCK_LGL_FASTA_CONTENT
 
+
 @pytest.fixture
 def ingestor(tmp_path):
     return ProteinDataIngestor(output_dir=tmp_path)
@@ -28,14 +29,14 @@ class TestProteinDataIngestor:
         Verify successful retrieval and transmission of raw UniProt FASTA data.
 
         Arrange:
-            Inject a mocked HTTP 200 response configured to return a 
+            Inject a mocked HTTP 200 response configured to return a
             controlled MOCK_LGL_FASTA_CONTENT string.
         Act:
             Invoke retrieve_fasta with a target UniProt ID (P51617).
         Assert:
-            Ensure the function output matches the mocked sequence 
+            Ensure the function output matches the mocked sequence
             content, verifies the correct endpoint API URL was called, and
-            confirms the output file is created at the expected path with 
+            confirms the output file is created at the expected path with
             correct mocked response.
         """
         mock_response = mocker.MagicMock()
@@ -43,7 +44,8 @@ class TestProteinDataIngestor:
         mock_response.text = MOCK_LGL_FASTA_CONTENT
 
         mock_get = mocker.patch.object(
-            ingestor.session, "get", return_value=mock_response)
+            ingestor.session, "get", return_value=mock_response
+        )
 
         result = ingestor.fetch_fasta(UNIPROT_ID, TARGET_NAME)
 
@@ -54,8 +56,11 @@ class TestProteinDataIngestor:
         mock_get.call_count == 1
 
         # 3. Verify side effect file system tracking
-        expected_file = ingestor.output_dir / "amino_acid_sequences" / \
-            f"{TARGET_NAME.lower()}_sequence.fasta"
+        expected_file = (
+            ingestor.output_dir
+            / "amino_acid_sequences"
+            / f"{TARGET_NAME.lower()}_sequence.fasta"
+        )
         assert expected_file.exists()
         assert expected_file.read_text(encoding="utf-8") == MOCK_LGL_FASTA_CONTENT
 
@@ -64,20 +69,19 @@ class TestProteinDataIngestor:
         Verify that a network timeout correctly triggers granular exception blocks.
 
         Arrange:
-            Inject an explicit requests ConnectTimeout error into the 
+            Inject an explicit requests ConnectTimeout error into the
             mocked requests.get network execution channel.
         Act:
             Invoke retrieve_fasta within a protective pytest assertion context.
         Assert:
-            Ensure that requests.exceptions.ConnectTimeout is raised, 
+            Ensure that requests.exceptions.ConnectTimeout is raised,
             verify that the network call respected the strict 10-second limit,
             and confirms the output file is not generated.
         """
         mock_get = mocker.patch.object(
             ingestor.session,
-            'get',
-            side_effect=requests.exceptions.ConnectTimeout(
-                "Connection timed out.")
+            "get",
+            side_effect=requests.exceptions.ConnectTimeout("Connection timed out."),
         )
 
         with pytest.raises(requests.exceptions.ConnectTimeout):
@@ -87,8 +91,11 @@ class TestProteinDataIngestor:
         mock_get.call_count == 1
 
         # 2. Verify side effect file system tracking
-        expected_file = ingestor.output_dir / "amino_acid_sequences" / \
-            f"{TARGET_NAME.lower()}_sequence.fasta"
+        expected_file = (
+            ingestor.output_dir
+            / "amino_acid_sequences"
+            / f"{TARGET_NAME.lower()}_sequence.fasta"
+        )
         assert not expected_file.exists()
 
     def test_fetch_cif_success(self, ingestor, mocker):
@@ -96,12 +103,12 @@ class TestProteinDataIngestor:
         Verify that a valid PDB ID is normalized and downloaded successfully.
 
         Arrange:
-            Configure a temporary testing directory path and patch the 
+            Configure a temporary testing directory path and patch the
             BioPython PDBList instance to return a controlled file path string.
         Act:
             Invoke download_pdb_files with an un-normalized, padded PDB ID.
         Assert:
-            Ensure a Path object is returned, and verify that the underlying 
+            Ensure a Path object is returned, and verify that the underlying
             PDBList method was called with a stripped, uppercase identifier.
         """
         structure_dir = ingestor.output_dir / "structures"
@@ -110,12 +117,11 @@ class TestProteinDataIngestor:
         # Physically build the folders and touch the file on disk so validation passes
         structure_dir.mkdir(parents=True, exist_ok=True)
         expected_file_path.write_text(
-            "data_8R3Y\n# dummy cif content", encoding="utf-8")
+            "data_8R3Y\n# dummy cif content", encoding="utf-8"
+        )
 
         mock_retrieve = mocker.patch.object(
-            PDBList,
-            "retrieve_pdb_file",
-            return_value=str(expected_file_path)
+            PDBList, "retrieve_pdb_file", return_value=str(expected_file_path)
         )
 
         result_path = ingestor.fetch_cif(" 8r3y ")
@@ -132,7 +138,7 @@ class TestProteinDataIngestor:
         args, kwargs = mock_retrieve.call_args
 
         # Assert the PDB ID is normalized to uppercase and stripped, wherever it sits
-        assert (args[0] == "8R3Y" or kwargs.get("pdb_code") == "8R3Y")
+        assert args[0] == "8R3Y" or kwargs.get("pdb_code") == "8R3Y"
 
         # Assert the format target matches up safely
         assert kwargs.get("file_format") == "mmCif"
@@ -153,18 +159,21 @@ class TestProteinDataIngestor:
             Ensure that a FileNotFoundError is raised with an informative error message.
         """
         mock_pdbl_instance = mocker.MagicMock()
-        mock_pdbl_instance.retrieve_pdb_file.return_value = None  # Simulates download failure
+        mock_pdbl_instance.retrieve_pdb_file.return_value = (
+            None  # Simulates download failure
+        )
         mocker.patch.object(
-            PDBList,
-            "retrieve_pdb_file",
-            return_value=str(mock_pdbl_instance)
+            PDBList, "retrieve_pdb_file", return_value=str(mock_pdbl_instance)
         )
 
-        with pytest.raises(FileNotFoundError, match="Failed to write structural files") as exc_info:
+        with pytest.raises(
+            FileNotFoundError, match="Failed to write structural files"
+        ) as exc_info:
             ingestor.fetch_cif("INVALID")
 
         assert "Failed to write structural files" in str(
-            exc_info.value) or "FileNotFoundError" in str(exc_info.value)
+            exc_info.value
+        ) or "FileNotFoundError" in str(exc_info.value)
 
     def test_fetch_cif_network_url_error(self, ingestor, mocker):
         """
@@ -179,18 +188,16 @@ class TestProteinDataIngestor:
             defensively while correctly chaining the underlying root cause.
         """
         mock_pdbl_instance = mocker.MagicMock()
-        mock_pdbl_instance.retrieve_pdb_file.side_effect = URLError(
-            "Host unreachable")
+        mock_pdbl_instance.retrieve_pdb_file.side_effect = URLError("Host unreachable")
         mocker.patch.object(
-            PDBList,
-            "retrieve_pdb_file",
-            side_effect=URLError("Host unreachable")
+            PDBList, "retrieve_pdb_file", side_effect=URLError("Host unreachable")
         )
         with pytest.raises(RuntimeError) as exc_info:
             ingestor.fetch_cif("8R3Y")
 
-        assert "Failed to write structural files for 8R3Y" in str(exc_info.value) or \
-               "Remote server" in str(exc_info.value)
+        assert "Failed to write structural files for 8R3Y" in str(
+            exc_info.value
+        ) or "Remote server" in str(exc_info.value)
 
     def test_fetch_cif_permission_error(self, ingestor, mocker):
         """
@@ -205,17 +212,19 @@ class TestProteinDataIngestor:
         """
         mock_pdbl_instance = mocker.MagicMock()
         mock_pdbl_instance.retrieve_pdb_file.side_effect = PermissionError(
-            "Write access denied")
+            "Write access denied"
+        )
         mocker.patch.object(
             PDBList,
             "retrieve_pdb_file",
-            side_effect=PermissionError("Write access denied")
+            side_effect=PermissionError("Write access denied"),
         )
         with pytest.raises(PermissionError) as exc_info:
             ingestor.fetch_cif("8R3Y")
 
-        assert "Write access denied" in str(exc_info.value) or \
-               "PermissionError" in str(exc_info.value)
+        assert "Write access denied" in str(exc_info.value) or "PermissionError" in str(
+            exc_info.value
+        )
 
 
 class TestParseArguments:
@@ -225,7 +234,7 @@ class TestParseArguments:
 
     def test_parse_arguments_success_without_emdb(self):
         """
-        Verify our command line parser extracts multiple targets correctly 
+        Verify our command line parser extracts multiple targets correctly
         without the optional argument for EMDB ID (-e).
 
         Arrange:
@@ -236,10 +245,16 @@ class TestParseArguments:
             Ensure the function output matches the mocked arguments.
         """
         test_args = [
-            "-n", "aPKC", "Lgl",
-            "-u", "P51617", "Q9VA29",
-            "-p", "8R3Y",
-            "-o", "../data"
+            "-n",
+            "aPKC",
+            "Lgl",
+            "-u",
+            "P51617",
+            "Q9VA29",
+            "-p",
+            "8R3Y",
+            "-o",
+            "../data",
         ]
 
         parsed = parse_arguments(test_args)
@@ -263,11 +278,18 @@ class TestParseArguments:
             Ensure the function output matches the mocked arguments.
         """
         test_args = [
-            "-n", "aPKC", "Lgl",
-            "-u", "P51617", "Q9VA29",
-            "-p", "8R3Y",
-            "-e", "EMD-18877",
-            "-o", "../data"
+            "-n",
+            "aPKC",
+            "Lgl",
+            "-u",
+            "P51617",
+            "Q9VA29",
+            "-p",
+            "8R3Y",
+            "-e",
+            "EMD-18877",
+            "-o",
+            "../data",
         ]
 
         parsed = parse_arguments(test_args)
@@ -291,12 +313,19 @@ class TestParseArguments:
             Ensure the function output matches the mocked arguments.
         """
         test_args = [
-            "-n", "aPKC", "Lgl",
-            "-u", "P51617", "Q9VA29",
-            "-p", "8R3Y",
-            "-e", "EMD-18877",
-            "-o", "../data",
-            "--coords-only"
+            "-n",
+            "aPKC",
+            "Lgl",
+            "-u",
+            "P51617",
+            "Q9VA29",
+            "-p",
+            "8R3Y",
+            "-e",
+            "EMD-18877",
+            "-o",
+            "../data",
+            "--coords-only",
         ]
 
         parsed = parse_arguments(test_args)
@@ -320,11 +349,16 @@ class TestParseArguments:
             Ensure the execution is halted with a usage message.
         """
         test_args = [
-            "-u", "P51617", "Q9VA29",
-            "-p", "8R3Y",
-            "-e", "EMD-18877",
-            "-o", "../data",
-            "--coords-only"
+            "-u",
+            "P51617",
+            "Q9VA29",
+            "-p",
+            "8R3Y",
+            "-e",
+            "EMD-18877",
+            "-o",
+            "../data",
+            "--coords-only",
         ]
 
         with pytest.raises(SystemExit) as exc_info:
@@ -350,7 +384,8 @@ class TestMain:
         main() dynamically treats download_all as True and fires all pipeline steps.
         """
         mock_ingestor_class = mocker.patch(
-            "polarity_engine.fetch_data.ProteinDataIngestor")
+            "polarity_engine.fetch_data.ProteinDataIngestor"
+        )
         mock_instance = mock_ingestor_class.return_value
 
         mock_fasta = mocker.patch.object(mock_instance, "fetch_fasta")
@@ -358,13 +393,20 @@ class TestMain:
         mock_map = mocker.patch.object(mock_instance, "fetch_em_density_map")
 
         # Act: Run main with standard parameters but NO specific mode modifiers
-        main([
-            "-n", "aPKC",
-            "-u", "P51617",
-            "-p", "8R3Y",
-            "-e", "EMD-18877",
-            "-o", "../data"
-        ])
+        main(
+            [
+                "-n",
+                "aPKC",
+                "-u",
+                "P51617",
+                "-p",
+                "8R3Y",
+                "-e",
+                "EMD-18877",
+                "-o",
+                "../data",
+            ]
+        )
 
         # Assert: All tracking channels should be fired by default
         mock_fasta.assert_called_once()
@@ -377,7 +419,8 @@ class TestMain:
         main() fires only fetch_fasta and fetch_cif.
         """
         mock_ingestor_class = mocker.patch(
-            "polarity_engine.fetch_data.ProteinDataIngestor")
+            "polarity_engine.fetch_data.ProteinDataIngestor"
+        )
         mock_instance = mock_ingestor_class.return_value
 
         mock_fasta = mocker.patch.object(mock_instance, "fetch_fasta")
@@ -385,14 +428,21 @@ class TestMain:
         mock_map = mocker.patch.object(mock_instance, "fetch_em_density_map")
 
         # Act: Run main with standard parameters but NO specific mode modifiers
-        main([
-            "-n", "aPKC",
-            "-u", "P51617",
-            "-p", "8R3Y",
-            "-e", "EMD-18877",
-            "-o", "../data",
-            "--coords-only"
-        ])
+        main(
+            [
+                "-n",
+                "aPKC",
+                "-u",
+                "P51617",
+                "-p",
+                "8R3Y",
+                "-e",
+                "EMD-18877",
+                "-o",
+                "../data",
+                "--coords-only",
+            ]
+        )
 
         # Assert: fasta and cif channels are fired but not map channgel.
         assert mock_fasta.call_count == 1
@@ -405,7 +455,8 @@ class TestMain:
         main() fires only fetch_fasta and fetch_cif.
         """
         mock_ingestor_class = mocker.patch(
-            "polarity_engine.fetch_data.ProteinDataIngestor")
+            "polarity_engine.fetch_data.ProteinDataIngestor"
+        )
         mock_instance = mock_ingestor_class.return_value
 
         mock_fasta = mocker.patch.object(mock_instance, "fetch_fasta")
@@ -413,14 +464,21 @@ class TestMain:
         mock_map = mocker.patch.object(mock_instance, "fetch_em_density_map")
 
         # Act: Run main with standard parameters but NO specific mode modifiers
-        main([
-            "-n", "aPKC",
-            "-u", "P51617",
-            "-p", "8R3Y",
-            "-e", "EMD-18877",
-            "-o", "../data",
-            "--maps-only"
-        ])
+        main(
+            [
+                "-n",
+                "aPKC",
+                "-u",
+                "P51617",
+                "-p",
+                "8R3Y",
+                "-e",
+                "EMD-18877",
+                "-o",
+                "../data",
+                "--maps-only",
+            ]
+        )
 
         # Assert: only map channel should be fired
         assert mock_fasta.call_count == 0
@@ -433,14 +491,23 @@ class TestMain:
         the pipeline fails
         """
         with pytest.raises(ValueError) as exc_info:
-            main([
-                "-n", "aPKC", "Par-6",
-                "-u", "P51617",
-                "-p", "8R3Y",
-                "-e", "EMD-18877",
-                "-o", "../data",
-                "--maps-only"
-            ])
+            main(
+                [
+                    "-n",
+                    "aPKC",
+                    "Par-6",
+                    "-u",
+                    "P51617",
+                    "-p",
+                    "8R3Y",
+                    "-e",
+                    "EMD-18877",
+                    "-o",
+                    "../data",
+                    "--maps-only",
+                ]
+            )
 
         assert "Mismatched parallel input arguments." in str(
-            exc_info.value) or "ValueError" in str(exc_info.value)
+            exc_info.value
+        ) or "ValueError" in str(exc_info.value)

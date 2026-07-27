@@ -10,7 +10,12 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from polarity_engine.parsers import FastaParser, StructureParser
-from tests.mock_data import MOCK_LGL_FASTA_CONTENT, MOCK_APKC_FASTA_CONTENT, MOCK_PDB_CONTENT_1, MOCK_CIF_CONTENT
+from tests.mock_data import (
+    MOCK_LGL_FASTA_CONTENT,
+    MOCK_APKC_FASTA_CONTENT,
+    MOCK_PDB_CONTENT_1,
+    MOCK_CIF_CONTENT,
+)
 
 
 @pytest.fixture
@@ -82,7 +87,7 @@ class TestFastaParser:
 
         expected_output = {
             "tr|A0A024RBG1|A0A024RBG1_HUMAN N-asymmetry factor": "MGNCCAGLSRRLKLPDCMA",
-            "sp|P41743|KPCI_HUMAN Protein kinase C iota type OS=Homo sapiens OX=9606 GN=PRKCI PE=1 SV=2": "MPTQRDSSTMSHTVAGGGSGDHS"
+            "sp|P41743|KPCI_HUMAN Protein kinase C iota type OS=Homo sapiens OX=9606 GN=PRKCI PE=1 SV=2": "MPTQRDSSTMSHTVAGGGSGDHS",
         }
 
         test_sequences = fasta_parser_cls.parse_fasta(fasta_file_path)
@@ -102,7 +107,9 @@ class TestFastaParser:
         """
         mock_fasta_path = tmp_path / "amino_acid_sequences" / "non_existent_file.fasta"
 
-        with pytest.raises(FileNotFoundError, match="Target FASTA file not found or invalid"):
+        with pytest.raises(
+            FileNotFoundError, match="Target FASTA file not found or invalid"
+        ):
             fasta_parser_cls.parse_fasta(mock_fasta_path)
 
     def test_fasta_parser_no_file_contents_error(self, fasta_parser_cls, tmp_path):
@@ -164,7 +171,9 @@ class TestFastaParser:
         mock_data = ">tr|A0A024RBG1|A0A024RBG1_HUMAN N-asymmetry factor\n"
         mock_fasta_path.write_text(mock_data, encoding="utf-8")
 
-        with pytest.raises(ValueError, match="Empty sequence string encountered under header"):
+        with pytest.raises(
+            ValueError, match="Empty sequence string encountered under header"
+        ):
             fasta_parser_cls.parse_fasta(mock_fasta_path)
 
     def test_validate_amino_acid_sequence_all_standard_success(self, fasta_parser_cls):
@@ -183,11 +192,14 @@ class TestFastaParser:
         test_sequence = "MGNCCAGLSRRLKLPDCMA"
 
         test_output = fasta_parser_cls._validate_amino_acid_sequence(
-            test_sequence, test_header)
+            test_sequence, test_header
+        )
 
         assert test_output == test_output
 
-    def test_validate_amino_acid_sequence_non_standard_success(self, fasta_parser_cls, caplog):
+    def test_validate_amino_acid_sequence_non_standard_success(
+        self, fasta_parser_cls, caplog
+    ):
         """
         Verify that validate_amino_acid_sequence returns True when amino acid string
         contains two non-standard amino acids but still valid.
@@ -204,18 +216,26 @@ class TestFastaParser:
         test_sequence = "MUGNCCAGLSRRLKLPZDCMA"
 
         test_output = fasta_parser_cls._validate_amino_acid_sequence(
-            test_sequence, test_header)
+            test_sequence, test_header
+        )
 
         # Filter captured log records to isolate warnings from this test execution
-        warning_records = [
-            rec for rec in caplog.records if rec.levelname == "WARNING"]
+        warning_records = [rec for rec in caplog.records if rec.levelname == "WARNING"]
 
         assert test_output == test_sequence
         assert len(warning_records) == 2
-        assert "Non-standard amino acid 'U' found at position 2" in warning_records[0].message
-        assert "Non-standard amino acid 'Z' found at position 17" in warning_records[1].message
+        assert (
+            "Non-standard amino acid 'U' found at position 2"
+            in warning_records[0].message
+        )
+        assert (
+            "Non-standard amino acid 'Z' found at position 17"
+            in warning_records[1].message
+        )
 
-    def test_validate_amino_acid_sequence_empty_string_error(self, fasta_parser_cls, caplog):
+    def test_validate_amino_acid_sequence_empty_string_error(
+        self, fasta_parser_cls, caplog
+    ):
         """
         Verify that validate_amino_acid_sequence returns False when an empty string is passed.
 
@@ -229,16 +249,18 @@ class TestFastaParser:
         test_header = ">tr|A0A024RBG1|A0A024RBG1_HUMAN N-asymmetry factor\n"
         test_sequence = ""
 
-        with pytest.raises(ValueError, match="Empty sequence string encountered under header"):
-            fasta_parser_cls._validate_amino_acid_sequence(
-                test_sequence, test_header)
+        with pytest.raises(
+            ValueError, match="Empty sequence string encountered under header"
+        ):
+            fasta_parser_cls._validate_amino_acid_sequence(test_sequence, test_header)
 
-        error_records = [
-            rec for rec in caplog.records if rec.levelname == "ERROR"]
+        error_records = [rec for rec in caplog.records if rec.levelname == "ERROR"]
 
         assert len(error_records) == 1
 
-    def test_validate_amino_acid_sequence_invalid_sequence_error(self, fasta_parser_cls, caplog):
+    def test_validate_amino_acid_sequence_invalid_sequence_error(
+        self, fasta_parser_cls, caplog
+    ):
         """
         Verify that validate_amino_acid_sequence returns False when amino acid string
         containining two invalid amino acids is passed.
@@ -254,12 +276,12 @@ class TestFastaParser:
         # '!' at position 2 is invalid
         test_sequence = "M!GNCCAGLSRRLKLPDCMA"
 
-        with pytest.raises(ValueError, match="Invalid amino acid '!' found at position 2"):
-            fasta_parser_cls._validate_amino_acid_sequence(
-                test_sequence, test_header)
+        with pytest.raises(
+            ValueError, match="Invalid amino acid '!' found at position 2"
+        ):
+            fasta_parser_cls._validate_amino_acid_sequence(test_sequence, test_header)
 
-        error_records = [
-            rec for rec in caplog.records if rec.levelname == "ERROR"]
+        error_records = [rec for rec in caplog.records if rec.levelname == "ERROR"]
 
         assert len(error_records) == 1
 
@@ -286,8 +308,7 @@ class TestStructureParser:
         mock_cif_path = structure_dir / "test_structure_file.cif"
         mock_cif_path.write_text(MOCK_PDB_CONTENT_1, encoding="utf-8")
 
-        test_invoke = structure_parser_cls._validate_structure_file(
-            mock_cif_path)
+        test_invoke = structure_parser_cls._validate_structure_file(mock_cif_path)
 
         assert test_invoke == ".cif"
 
@@ -307,7 +328,9 @@ class TestStructureParser:
         with pytest.raises(FileNotFoundError, match="Target structure file not found"):
             structure_parser_cls._validate_structure_file(mock_cif_path)
 
-    def test_load_and_inspect_success_with_pdb_file(self, structure_parser_cls, tmp_path):
+    def test_load_and_inspect_success_with_pdb_file(
+        self, structure_parser_cls, tmp_path
+    ):
         """
         Ensure a tuple of list of unique chain_ids and a Structure object is returned.
 
@@ -354,7 +377,10 @@ class TestStructureParser:
         mock_structure.__getitem__.return_value = mock_model_0
 
         # Patch the PDBParser instance method directly to avoid filesystem checks
-        with patch("polarity_engine.parsers.PDBParser.get_structure", return_value=mock_structure):
+        with patch(
+            "polarity_engine.parsers.PDBParser.get_structure",
+            return_value=mock_structure,
+        ):
             with caplog.at_level(logging.WARNING, logger="src.parsers"):
                 chains, struct = structure_parser_cls._load_and_inspect(
                     file_path, file_ext
@@ -366,7 +392,9 @@ class TestStructureParser:
         assert caplog.records[0].levelname == "WARNING"
         assert "contains 3 models. Defaulting to Model 0." in caplog.text
 
-    def test_load_and_inspect_with_invalid_pdb_error(self, structure_parser_cls, tmp_path):
+    def test_load_and_inspect_with_invalid_pdb_error(
+        self, structure_parser_cls, tmp_path
+    ):
         """
         Verify ValueError is raised when an invalid file path is passed.
 
@@ -386,7 +414,9 @@ class TestStructureParser:
         with pytest.raises(ValueError, match="Malformed PDB file structure"):
             structure_parser_cls._load_and_inspect(mock_pdb_path, ".pdb")
 
-    def test_load_and_inspect_success_with_cif_file(self, structure_parser_cls, tmp_path):
+    def test_load_and_inspect_success_with_cif_file(
+        self, structure_parser_cls, tmp_path
+    ):
         """
         Ensure a tuple of list of unique chain_ids and an MMCIF2Dict instance is returned.
 
@@ -411,7 +441,9 @@ class TestStructureParser:
         # MMCIF2Dict inherits directly from dict
         assert isinstance(test_data, dict)
 
-    def test_load_and_inspect_with_invalid_cif_error(self, structure_parser_cls, tmp_path):
+    def test_load_and_inspect_with_invalid_cif_error(
+        self, structure_parser_cls, tmp_path
+    ):
         """
         Verify ValueError is raised when an unparseable .cif file path is passed.
 
@@ -449,19 +481,21 @@ class TestStructureParser:
         modified_data = MOCK_CIF_CONTENT.replace("_atom_site.auth_asym_id", "")
         mock_cif_path.write_text(modified_data, encoding="utf-8")
 
-        with pytest.raises(ValueError, match="Missing essential key '_atom_site.auth_asym_id'"):
+        with pytest.raises(
+            ValueError, match="Missing essential key '_atom_site.auth_asym_id'"
+        ):
             structure_parser_cls._load_and_inspect(mock_cif_path, ".cif")
 
     def test_parse_legacy_pdb_success(self, structure_parser_cls):
         """
         Arrange:
-            Assemble a mock Biopython Structure containing a single chain with 
+            Assemble a mock Biopython Structure containing a single chain with
             one standard CA atom and one disordered CA atom with an altloc.
         Act:
             Invoke _parse_legacy_pdb for target chain 'A'.
         Assert:
-            Verify that CA coordinates, B-factors, and occupancies are correctly 
-            extracted, handling disordered child selection, and returned in the 
+            Verify that CA coordinates, B-factors, and occupancies are correctly
+            extracted, handling disordered child selection, and returned in the
             nested dictionary structure under key 'A'.
         """
         target_chain = "A"
@@ -501,14 +535,11 @@ class TestStructureParser:
         mock_structure = MagicMock()
         mock_structure.__getitem__.return_value = mock_model
 
-        expected_coords = np.array(
-            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
+        expected_coords = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
         expected_b_factors = np.array([15.5, 22.1], dtype=np.float32)
         expected_occupancies = np.array([1.0, 0.50], dtype=np.float32)
 
-        result = structure_parser_cls._parse_legacy_pdb(
-            mock_structure, target_chain)
-
+        result = structure_parser_cls._parse_legacy_pdb(mock_structure, target_chain)
 
         assert result["coords"].shape == (2, 3)
         assert result["coords"].dtype == np.float32
@@ -534,7 +565,9 @@ class TestStructureParser:
         mock_structure = MagicMock()
         mock_structure.__getitem__.return_value = mock_model
 
-        with pytest.raises(ValueError, match="No valid Alpha Carbon \\(CA\\) atoms found"):
+        with pytest.raises(
+            ValueError, match="No valid Alpha Carbon \\(CA\\) atoms found"
+        ):
             structure_parser_cls._parse_legacy_pdb(mock_structure, "A")
 
     def test_parse_mmcif_fast_path_success(self, structure_parser_cls):
@@ -542,11 +575,11 @@ class TestStructureParser:
         Arrange:
             Construct a mock mmCIF dictionary containing standard polymer atoms,
             non-CA backbone atoms, multiple chains, B-factors, and occupancy values.
-        Act: 
+        Act:
             Call _parse_mmcif_fast_path for target chain 'A'.
         Assert:
-            Verify that non-CA atoms and off-target chains are filtered out, and 
-            that spatial coordinates, b-factors, and occupancies are parsed into 
+            Verify that non-CA atoms and off-target chains are filtered out, and
+            that spatial coordinates, b-factors, and occupancies are parsed into
             the correct float32 NumPy arrays under the chain key.
         """
         target_chain = "A"
@@ -591,14 +624,14 @@ class TestStructureParser:
         self, mock_parse_pdb, mock_inspect, mock_validate, structure_parser_cls
     ):
         """
-        Arrange: 
+        Arrange:
             Configure file validation to return '.pdb' extension, mock structure inspection,
-            and define mock parser return dictionary containing spatial coordinates, 
+            and define mock parser return dictionary containing spatial coordinates,
             B-factors, and occupancies.
         Act:
             Call get_alpha_carbon_coordinates requesting specific chain 'A'.
         Assert:
-            Verify that validation, inspection, and legacy PDB parsing are invoked with 
+            Verify that validation, inspection, and legacy PDB parsing are invoked with
             correct parameters, and that the target chain payload is returned.
         """
         target_chain = "A"
@@ -615,16 +648,21 @@ class TestStructureParser:
         mock_parse_pdb.return_value = expected_payload
 
         result = structure_parser_cls.get_alpha_carbon_coordinates(
-            "dummy.pdb", target_chain)
+            "dummy.pdb", target_chain
+        )
 
         assert "coords" in result[target_chain]
         assert "b_factors" in result[target_chain]
 
-        assert np.array_equal(result[target_chain]["coords"], expected_payload["coords"])
         assert np.array_equal(
-            result[target_chain]["b_factors"], expected_payload["b_factors"])
+            result[target_chain]["coords"], expected_payload["coords"]
+        )
         assert np.array_equal(
-            result[target_chain]["occupancies"], expected_payload["occupancies"])
+            result[target_chain]["b_factors"], expected_payload["b_factors"]
+        )
+        assert np.array_equal(
+            result[target_chain]["occupancies"], expected_payload["occupancies"]
+        )
 
         mock_validate.assert_called_once_with("dummy.pdb")
         mock_inspect.assert_called_once_with(Path("dummy.pdb"), ".pdb")
@@ -639,12 +677,12 @@ class TestStructureParser:
         """
         Arrange:
             Configure file validation to return '.cif' extension, mock structure inspection,
-            and define mock mmCIF parser return dictionary containing spatial coordinates, 
+            and define mock mmCIF parser return dictionary containing spatial coordinates,
             B-factors, and occupancies for chain 'A'.
         Act:
             Call get_alpha_carbon_coordinates requesting specific chain 'A'.
         Assert:
-            Verify that validation, inspection, and fast-path mmCIF parsing are invoked 
+            Verify that validation, inspection, and fast-path mmCIF parsing are invoked
             with correct parameters, and that the target chain payload is returned.
         """
         target_chain = "A"
@@ -660,16 +698,21 @@ class TestStructureParser:
         mock_parse_mmcif.return_value = expected_payload
 
         result = structure_parser_cls.get_alpha_carbon_coordinates(
-            "dummy.cif", target_chain)
+            "dummy.cif", target_chain
+        )
 
         assert "coords" in result[target_chain]
         assert "b_factors" in result[target_chain]
 
-        assert np.array_equal(result[target_chain]["coords"], expected_payload["coords"])
         assert np.array_equal(
-            result[target_chain]["b_factors"], expected_payload["b_factors"])
+            result[target_chain]["coords"], expected_payload["coords"]
+        )
         assert np.array_equal(
-            result[target_chain]["occupancies"], expected_payload["occupancies"])
+            result[target_chain]["b_factors"], expected_payload["b_factors"]
+        )
+        assert np.array_equal(
+            result[target_chain]["occupancies"], expected_payload["occupancies"]
+        )
 
         mock_validate.assert_called_once_with("dummy.cif")
         mock_inspect.assert_called_once_with(Path("dummy.cif"), ".cif")
@@ -682,7 +725,7 @@ class TestStructureParser:
     ):
         """
         Arrange:
-            Configure mock structure inspection to return available chains ['B', 'C'], 
+            Configure mock structure inspection to return available chains ['B', 'C'],
             omitting the requested chain 'A'.
         Act:
             Invoke get_alpha_carbon_coordinates requesting chain 'A'.
@@ -693,6 +736,9 @@ class TestStructureParser:
         mock_validate.return_value = ".pdb"
         mock_inspect.return_value = (["B", "C"], MagicMock())
 
-        with pytest.raises(ValueError, match=f"Requested chain '{requested_chain}' not found"):
+        with pytest.raises(
+            ValueError, match=f"Requested chain '{requested_chain}' not found"
+        ):
             structure_parser_cls.get_alpha_carbon_coordinates(
-                "dummy.pdb", requested_chain)
+                "dummy.pdb", requested_chain
+            )
