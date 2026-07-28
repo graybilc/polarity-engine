@@ -24,7 +24,7 @@ jobs:
 
     # 3. Ensure Python 3.13 is available
     - name: Set up Python
-      run: uv python install 3.13
+      run: uv python install 3.12
 
     # 4. Sync dependencies strictly using your uv.lock file
     - name: Install dependencies
