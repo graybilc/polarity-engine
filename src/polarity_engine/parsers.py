@@ -257,7 +257,7 @@ class StructureParser:
         """
         model = structure[0]
         chain = model[chain_id]
-        ca_coordinates, b_factors, occupancies = [], [], []
+        ca_coordinates, aa_residues, b_factors, occupancies = [], [], [], []
 
         for residue in chain:
             # Skip heteroatoms/water and verify CA exists
@@ -269,6 +269,7 @@ class StructureParser:
                     atom = atom.selected_child
 
                 ca_coordinates.append(atom.get_coord())
+                aa_residues.append(atom.get_residue())
                 b_factors.append(atom.get_bfactor())
                 occupancies.append(atom.get_occupancy())
 
@@ -279,6 +280,7 @@ class StructureParser:
 
         return {
             "coords": np.array(ca_coordinates, dtype=np.float32),
+            "aa_residues": aa_residues,
             "b_factors": np.array(b_factors, dtype=np.float32),
             "occupancies": np.array(occupancies, dtype=np.float32),
         }
@@ -295,8 +297,8 @@ class StructureParser:
             mmcif_dict (dict): MMCIF2Dict object for the target project.
             chain_id (str): Name used for the distinct, covalently linked macromolecule in the structure file.
         Returns:
-            chain_data (dict[str, np.ndarray]): dict with chain_id as the key and CA coordinates, B-factor,
-            and Occupancy in the specified chain.
+            chain_data (dict[str, np.ndarray]): dict with chain_id as the key and CA coordinates,
+            amino acid residues, B-factor, and Occupancy in the specified chain.
         """
         required_keys = [
             "_atom_site.group_PDB",
@@ -305,6 +307,7 @@ class StructureParser:
             "_atom_site.Cartn_x",
             "_atom_site.Cartn_y",
             "_atom_site.Cartn_z",
+            "_atom_site.auth_comp_id",
             "_atom_site.B_iso_or_equiv",  # B-factor / local resolution proxy
             "_atom_site.occupancy",  # Occupancy fraction
         ]
@@ -321,16 +324,17 @@ class StructureParser:
             for k in required_keys
         }
 
-        ca_coordinates, b_factors, occupancies = [], [], []
+        ca_coordinates, aa_residues, b_factors, occupancies = [], [], [], []
 
         # Parallel iteration over the coordinate columns
-        for group, chain, atom_name, x, y, z, b_val, occ_val in zip(
+        for group, chain, atom_name, x, y, z, aa, b_val, occ_val in zip(
             cols["_atom_site.group_PDB"],
             cols["_atom_site.auth_asym_id"],
             cols["_atom_site.label_atom_id"],
             cols["_atom_site.Cartn_x"],
             cols["_atom_site.Cartn_y"],
             cols["_atom_site.Cartn_z"],
+            cols["_atom_site.auth_comp_id"],
             cols["_atom_site.B_iso_or_equiv"],
             cols["_atom_site.occupancy"],
         ):
@@ -338,6 +342,7 @@ class StructureParser:
             if group == "ATOM" and chain == chain_id and atom_name == "CA":
                 try:
                     ca_coordinates.append([float(x), float(y), float(z)])
+                    aa_residues.append(str(aa))
                     b_factors.append(float(b_val))
                     occupancies.append(float(occ_val))
                 except ValueError as e:
@@ -352,6 +357,7 @@ class StructureParser:
 
         return {
             "coords": np.array(ca_coordinates, dtype=np.float32),
+            "aa_residues": aa_residues,
             "b_factors": np.array(b_factors, dtype=np.float32),
             "occupancies": np.array(occupancies, dtype=np.float32),
         }
