@@ -494,7 +494,7 @@ class TestStructureParser:
         Act:
             Invoke _parse_legacy_pdb for target chain 'A'.
         Assert:
-            Verify that CA coordinates, B-factors, and occupancies are correctly
+            Verify that CA coordinates, amino acid residues, B-factors, and occupancies are correctly
             extracted, handling disordered child selection, and returned in the
             nested dictionary structure under key 'A'.
         """
@@ -504,12 +504,14 @@ class TestStructureParser:
         mock_atom_1 = MagicMock()
         mock_atom_1.is_disordered.return_value = False
         mock_atom_1.get_coord.return_value = [1.0, 2.0, 3.0]
+        mock_atom_1.get_residue.return_value = "VAL"
         mock_atom_1.get_bfactor.return_value = 15.5
         mock_atom_1.get_occupancy.return_value = 1.0
 
         # Mock disordered CA atom (simulating an altloc flexible residue)
         mock_selected_child = MagicMock()
         mock_selected_child.get_coord.return_value = [4.0, 5.0, 6.0]
+        mock_selected_child.get_residue.return_value = "MET"
         mock_selected_child.get_bfactor.return_value = 22.1
         mock_selected_child.get_occupancy.return_value = 0.50
 
@@ -536,6 +538,7 @@ class TestStructureParser:
         mock_structure.__getitem__.return_value = mock_model
 
         expected_coords = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
+        expected_aa_residues = ["VAL", "MET"]
         expected_b_factors = np.array([15.5, 22.1], dtype=np.float32)
         expected_occupancies = np.array([1.0, 0.50], dtype=np.float32)
 
@@ -544,6 +547,10 @@ class TestStructureParser:
         assert result["coords"].shape == (2, 3)
         assert result["coords"].dtype == np.float32
         assert np.array_equal(result["coords"], expected_coords)
+
+        assert type(result["aa_residues"]) == list
+        assert result["coords"].shape[0] == len(result["aa_residues"])
+        assert result["aa_residues"] == expected_aa_residues
 
         assert result["b_factors"].dtype == np.float32
         assert np.array_equal(result["b_factors"], expected_b_factors)
@@ -574,12 +581,12 @@ class TestStructureParser:
         """
         Arrange:
             Construct a mock mmCIF dictionary containing standard polymer atoms,
-            non-CA backbone atoms, multiple chains, B-factors, and occupancy values.
+            non-CA backbone atoms, multiple chains, amino acids, B-factors, and occupancy values.
         Act:
             Call _parse_mmcif_fast_path for target chain 'A'.
         Assert:
             Verify that non-CA atoms and off-target chains are filtered out, and
-            that spatial coordinates, b-factors, and occupancies are parsed into
+            that spatial coordinates, amino acids, b-factors, and occupancies are parsed into
             the correct float32 NumPy arrays under the chain key.
         """
         target_chain = "A"
@@ -590,6 +597,7 @@ class TestStructureParser:
             "_atom_site.Cartn_x": ["10.0", "11.0", "12.0", "20.0"],
             "_atom_site.Cartn_y": ["20.0", "21.0", "22.0", "30.0"],
             "_atom_site.Cartn_z": ["30.0", "31.0", "32.0", "40.0"],
+            "_atom_site.auth_comp_id": ["SER", "PRO", "ALA", "HIS"],
             "_atom_site.B_iso_or_equiv": ["15.5", "18.2", "16.0", "22.1"],
             "_atom_site.occupancy": ["1.0", "1.0", "0.85", "1.0"],
         }
@@ -597,6 +605,7 @@ class TestStructureParser:
         expected_coords = np.array(
             [[10.0, 20.0, 30.0], [12.0, 22.0, 32.0]], dtype=np.float32
         )
+        expected_aa_reisudes = ["SER", "ALA"]
         expected_b_factors = np.array([15.5, 16.0], dtype=np.float32)
         expected_occupancies = np.array([1.0, 0.85], dtype=np.float32)
 
@@ -605,11 +614,16 @@ class TestStructureParser:
         )
 
         assert "coords" in result
+        assert "aa_residues" in result
         assert "b_factors" in result
 
         assert result["coords"].shape == (2, 3)
         assert result["coords"].dtype == np.float32
         assert np.array_equal(result["coords"], expected_coords)
+
+        assert type(result["aa_residues"]) == list
+        assert result["aa_residues"] == expected_aa_reisudes
+        assert result["coords"].shape[0] == len(result["aa_residues"])
 
         assert result["b_factors"].dtype == np.float32
         assert np.array_equal(result["b_factors"], expected_b_factors)
@@ -641,6 +655,7 @@ class TestStructureParser:
 
         expected_payload = {
             "coords": np.array([[1.0, 2.0, 3.0]], dtype=np.float32),
+            "aa_residues": ["GLU"],
             "b_factors": np.array([15.5], dtype=np.float32),
             "occupancies": np.array([1.0], dtype=np.float32),
         }
@@ -652,10 +667,15 @@ class TestStructureParser:
         )
 
         assert "coords" in result[target_chain]
+        assert "aa_residues" in result[target_chain]
         assert "b_factors" in result[target_chain]
 
         assert np.array_equal(
             result[target_chain]["coords"], expected_payload["coords"]
+        )
+        assert result[target_chain]["aa_residues"] == expected_payload["aa_residues"]
+        assert result[target_chain]["coords"].shape[0] == len(
+            result[target_chain]["aa_residues"]
         )
         assert np.array_equal(
             result[target_chain]["b_factors"], expected_payload["b_factors"]
@@ -678,7 +698,7 @@ class TestStructureParser:
         Arrange:
             Configure file validation to return '.cif' extension, mock structure inspection,
             and define mock mmCIF parser return dictionary containing spatial coordinates,
-            B-factors, and occupancies for chain 'A'.
+            amino acid residues, B-factors, and occupancies for chain 'A'.
         Act:
             Call get_alpha_carbon_coordinates requesting specific chain 'A'.
         Assert:
@@ -692,6 +712,7 @@ class TestStructureParser:
 
         expected_payload = {
             "coords": np.array([[12.345, 23.456, 34.567]], dtype=np.float32),
+            "aa_residues": ["ARG"],
             "b_factors": np.array([22.1], dtype=np.float32),
             "occupancies": np.array([0.85], dtype=np.float32),
         }
@@ -702,6 +723,7 @@ class TestStructureParser:
         )
 
         assert "coords" in result[target_chain]
+        assert "aa_residues" in result[target_chain]
         assert "b_factors" in result[target_chain]
 
         assert np.array_equal(
@@ -710,6 +732,7 @@ class TestStructureParser:
         assert np.array_equal(
             result[target_chain]["b_factors"], expected_payload["b_factors"]
         )
+        assert result[target_chain]["aa_residues"] == expected_payload["aa_residues"]
         assert np.array_equal(
             result[target_chain]["occupancies"], expected_payload["occupancies"]
         )
