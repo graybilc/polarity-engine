@@ -253,7 +253,7 @@ class StructureParser:
 
         Returns:
             dict[str, dict[str, np.ndarray]]: Dictionary mapping chain_id to
-            arrays for 'coords', 'b_factors', and 'occupancies'.
+            arrays for 'coords', 'b_factors', and 'occupancies' as well as list of amino acid residues.
         """
         model = structure[0]
         chain = model[chain_id]
