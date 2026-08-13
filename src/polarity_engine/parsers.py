@@ -244,7 +244,7 @@ class StructureParser:
         cls, structure: Structure, chain_id: str
     ) -> dict[str, dict[str, np.ndarray]]:
         """
-        Extracts CA coordinates, B-factors, and occupancy values directly from
+        Extracts CA coordinates, amino acid residues, B-factors, and occupancy values directly from
         a pre-loaded Biopython Structure object.
 
         Args:
