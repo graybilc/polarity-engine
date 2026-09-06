@@ -361,11 +361,3 @@ class StructureParser:
             "b_factors": np.array(b_factors, dtype=np.float32),
             "occupancies": np.array(occupancies, dtype=np.float32),
         }
-
-
-# def main(args_list: Sequence[str] | None = None) -> None:
-#     pass
-
-
-# if __name__ == "__main__":
-#     main(sys.argv[1:])
