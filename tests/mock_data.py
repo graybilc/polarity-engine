@@ -1,5 +1,7 @@
 """Centralized static mock data for unit tests."""
 
+import numpy as np
+
 UNIPROT_ID = "P51617"
 
 TARGET_NAME = "lgl"
@@ -37,3 +39,36 @@ MOCK_CIF_CONTENT = (
     "ATOM  A  CA  12.345  23.456  34.567\n"
     "ATOM  A  CA  13.100  24.200  35.300\n"
 )
+
+MOCK_PROTEIN_5RES = {
+    "aa_list": ["ALA", "GLY", "SER", "TRP", "UNK"],
+    "coords": np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [3.0, 0.0, 0.0],  # 3.0 Å from node 0
+            [6.0, 0.0, 0.0],  # 3.0 Å from node 1, 6.0 Å from node 0
+            [9.0, 0.0, 0.0],  # > 8.0 Å from node 0
+            [20.0, 0.0, 0.0],  # Isolated node (> 8.0 Å from all nodes)
+        ],
+        dtype=np.float32,
+    ),
+    "name": "mock_5res_complex",
+}
+
+MOCK_PROTEIN_SINGLE_RES = {
+    "aa_list": ["ALA"],
+    "coords": np.array([[0.0, 0.0, 0.0]], dtype=np.float32),
+    "name": "mock_single_res",
+}
+
+MOCK_PROTEIN_CORRUPTED_NAN = {
+    "aa_list": ["ALA", "GLY"],
+    "coords": np.array([[0.0, 0.0, 0.0], [np.nan, 0.0, 0.0]], dtype=np.float32),
+    "name": "mock_corrupted_nan",
+}
+
+MOCK_PROTEIN_CORRUPTED_INF = {
+    "aa_list": ["ALA", "GLY"],
+    "coords": np.array([[0.0, 0.0, 0.0], [np.inf, 0.0, 0.0]], dtype=np.float32),
+    "name": "mock_corrupted_inf",
+}

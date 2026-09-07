@@ -14,9 +14,16 @@ repos:
         language: system
         types: [python]
 
+      - id: pytest
+        name: pytest-suite
+        entry: uv run pytest
+        language: system
+        pass_filenames: false
+        always_run: true
+
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v3.2.0
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
-        args: [] # Optional: custom types if you ever want to add them
+        args: []
