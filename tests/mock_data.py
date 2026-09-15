@@ -52,23 +52,68 @@ MOCK_PROTEIN_5RES = {
         ],
         dtype=np.float32,
     ),
+    "nodes": [
+        ("A", "1", "ALA"),
+        ("A", "2", "GLY"),
+        ("A", "3", "SER"),
+        ("A", "4", "TRP"),
+        ("A", "5", "UNK"),
+    ],
+    "sasa_map": {
+        ("A", "1"): 64.5,  # ALA: rSASA = 64.5 / 129.0 = 0.5
+        ("A", "2"): 0.0,  # GLY: Core buried
+        ("A", "3"): 77.5,  # SER: rSASA = 77.5 / 155.0 = 0.5
+        ("A", "4"): 285.0,  # TRP: Fully exposed
+        ("A", "5"): 98.5,  # UNK: Triggers DEFAULT_MAX_ASA fallback (197.0) -> 0.5
+    },
     "name": "mock_5res_complex",
 }
 
 MOCK_PROTEIN_SINGLE_RES = {
     "aa_list": ["ALA"],
     "coords": np.array([[0.0, 0.0, 0.0]], dtype=np.float32),
+    "nodes": [("A", "1", "ALA")],
+    "sasa_map": {("A", "1"): 64.5},
     "name": "mock_single_res",
 }
 
 MOCK_PROTEIN_CORRUPTED_NAN = {
     "aa_list": ["ALA", "GLY"],
     "coords": np.array([[0.0, 0.0, 0.0], [np.nan, 0.0, 0.0]], dtype=np.float32),
+    "nodes": [("A", "1", "ALA"), ("A", "2", "GLY")],
+    "sasa_map": {("A", "1"): 64.5, ("A", "2"): 0.0},
     "name": "mock_corrupted_nan",
 }
 
 MOCK_PROTEIN_CORRUPTED_INF = {
     "aa_list": ["ALA", "GLY"],
     "coords": np.array([[0.0, 0.0, 0.0], [np.inf, 0.0, 0.0]], dtype=np.float32),
+    "nodes": [("A", "1", "ALA"), ("A", "2", "GLY")],
+    "sasa_map": {("A", "1"): 64.5, ("A", "2"): 0.0},
     "name": "mock_corrupted_inf",
 }
+
+# Minimal mock nodes for a synthetic 3-residue complex: (chain_id, res_num_str, res_name_3let)
+MOCK_NODES = [
+    ("A", "1", "ALA"),  # Standard residue (MaxASA = 129.0 Å²)
+    ("A", "2", "TRP"),  # Core buried residue (0.0 raw SASA)
+    ("A", "3", "XYZ"),  # Non-standard residue (Triggers DEFAULT_MAX_ASA fallback)
+    ("B", "10", "ILE"),  # Exposed interface residue (Tests bound clamping to 1.0)
+]
+
+# Corresponding raw per-residue SASA map (in Å²)
+MOCK_SASA_MAP = {
+    ("A", "1"): 64.5,  # Expected rSASA = 64.5 / 129.0 = 0.50
+    ("A", "2"): 0.0,  # Expected rSASA = 0.00
+    ("A", "3"): 98.5,  # Expected rSASA = 98.5 / 197.0 = 0.50 (fallback)
+    ("B", "10"): 300.0,  # Raw > 197.0 -> Expected rSASA clamped to 1.00
+}
+
+# Matching amino acid list and coordinates for PyG Data assembly testing
+MOCK_AA_LIST = ["ALA", "TRP", "XYZ", "ILE"]
+MOCK_COORDS_NP = [
+    [0.0, 0.0, 0.0],
+    [3.8, 0.0, 0.0],
+    [7.6, 0.0, 0.0],
+    [11.4, 0.0, 0.0],
+]

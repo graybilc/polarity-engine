@@ -2,11 +2,13 @@
 
 
 import argparse
+import freesasa
 import logging
 import numpy as np
 import sys
+import torch
 
-from Bio.PDB import PDBParser
+from Bio.PDB import MMCIFParser, PDBParser
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 from Bio.PDB.Structure import Structure
 from pathlib import Path
@@ -119,7 +121,11 @@ class FastaParser:
 
 class StructureParser:
     """
-    Parses protein structure files (PDB/mmCIF) to extract 3D coordinates.
+    Parses protein structure files (PDB/mmCIF) to extract 3D coordinates
+    and biophysical surface properties (SASA).
+
+    Handles raw file I/O, BioPython structure parsing, coordinate extractions,
+    and native C-binding surface accessibility calculations via FreeSASA.
 
     Design Note:
         For mmCIF parsing, we deliberately bypass Biopython's full SMCRA
@@ -361,3 +367,69 @@ class StructureParser:
             "b_factors": np.array(b_factors, dtype=np.float32),
             "occupancies": np.array(occupancies, dtype=np.float32),
         }
+
+    @staticmethod
+    def get_freesasa_result(file_path: Path) -> tuple[freesasa.Result, Any]:
+        """Parses a PDB or mmCIF file and calculates SASA via FreeSASA's BioPython bridge.
+
+        Args:
+            file_path (Path): Path to the structure file (.pdb or .cif/.mmcif).
+
+        Returns:
+            tuple[freesasa.Result, Any]: FreeSASA result and root tree node object.
+
+        Raises:
+            ValueError: If the file extension is unsupported or structure parsing fails.
+        """
+        file_path = Path(file_path)
+        file_ext = file_path.suffix.lower()
+
+        try:
+            if file_ext in (".cif", ".mmcif"):
+                parser = MMCIFParser(QUIET=True)
+                bio_structure = parser.get_structure(file_path.stem, str(file_path))
+            elif file_ext == ".pdb":
+                parser = PDBParser(QUIET=True)
+                bio_structure = parser.get_structure(file_path.stem, str(file_path))
+            else:
+                raise ValueError(
+                    f"Unsupported extension '{file_ext}' for FreeSASA parsing."
+                )
+        except Exception as e:
+            raise ValueError(
+                f"Failed to parse structure file '{file_path.name}': {e}"
+            ) from e
+
+        # 1. Convert BioPython Structure -> freesasa.Structure
+        fs_structure = freesasa.structureFromBioPDB(bio_structure)
+
+        # 2. Run SASA calculation
+        result = freesasa.calc(fs_structure)
+
+        return result, fs_structure
+
+    @staticmethod
+    def extract_per_residue_sasa(
+        result: freesasa.Result, fs_structure: freesasa.Structure
+    ) -> dict[tuple[str, str], float]:
+        """Aggregates atomic SASA values per residue across the complex.
+
+        Args:
+            result (freesasa.Result): FreeSASA computation result.
+            fs_structure (freesasa.Structure): FreeSASA structure instance.
+
+        Returns:
+            dict[tuple[str, str], float]: Mapping of (chain_id, res_number_str) -> raw SASA (Å²).
+        """
+        residue_sasa_map = {}
+        n_atoms = fs_structure.nAtoms()
+
+        for i in range(n_atoms):
+            chain_id = fs_structure.chainLabel(i)
+            res_num = fs_structure.residueNumber(i).strip()
+            atom_area = result.atomArea(i)
+
+            key = (chain_id, res_num)
+            residue_sasa_map[key] = residue_sasa_map.get(key, 0.0) + atom_area
+
+        return residue_sasa_map
