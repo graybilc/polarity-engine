@@ -1,8 +1,6 @@
 #!/urs/bin/env python3
 
 
-import freesasa
-import io
 import logging
 import numpy as np
 from pathlib import Path
@@ -181,7 +179,8 @@ class ProteinGraphBuilder:
     def _distance_to_sparse_coo(
         self, dist_matrix: torch.Tensor, include_self_loops: bool = False
     ) -> tuple[torch.Tensor, int]:
-        """Converts a dense pairwise distance matrix to PyTorch Geometric COO edge_index format.
+        """
+        Converts a dense pairwise distance matrix to PyTorch Geometric COO edge_index format.
 
         Args:
             dist_matrix: Pairwise distance tensor of shape (N, N).
@@ -270,6 +269,30 @@ class ProteinGraphBuilder:
 
         return torch.tensor(rsasa_values, dtype=torch.float32)
 
+    @staticmethod
+    def _compute_inter_chain_flag(
+        edge_index: torch.Tensor, nodes: list[tuple[str, str, str]]
+    ) -> torch.Tensor:
+        """Computes binary flag indicating if an edge crosses chain boundaries.
+
+        Args:
+            edge_index: Long tensor of shape (2, E).
+            nodes: List of (chain_id, res_num, res_name) node metadata of length N.
+
+        Returns:
+            torch.Tensor: Float32 tensor of shape (E, 1) where 1.0 indicates an
+            inter-subunit interface edge and 0.0 indicates an intra-chain edge.
+        """
+        src_indices = edge_index[0].tolist()
+        dst_indices = edge_index[1].tolist()
+
+        # Compare chain_id (index 0 of each node metadata tuple)
+        flags = [
+            [1.0] if nodes[i][0] != nodes[j][0] else [0.0]
+            for i, j in zip(src_indices, dst_indices)
+        ]
+        return torch.tensor(flags, dtype=torch.float32)
+
     def build_graph(
         self,
         aa_list: list[str],
@@ -326,8 +349,11 @@ class ProteinGraphBuilder:
         # 5. Apply Gaussian RBF Expansion: (E, 1) -> (E, 16)
         rbf_out = self.rbf_module(dist_scalar)
 
-        # 6. Concatenate Direction Vectors + RBF Fingerprints: (E, 19)
-        edge_attr = torch.cat([unit_vec, rbf_out], dim=1)
+        # 6. Compute Inter-Subunit Interface Flag: (E, 1)
+        inter_chain_flag = self._compute_inter_chain_flag(edge_index, nodes)
+
+        # 7. Concatenate Direction Vectors + RBF Fingerprints + Interface Flag: (E, 20)
+        edge_attr = torch.cat([unit_vec, rbf_out, inter_chain_flag], dim=1)
 
         return Data(
             x=x, edge_index=edge_index, edge_attr=edge_attr, pos=coords, name=name

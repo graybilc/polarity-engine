@@ -121,8 +121,8 @@ class TestProteinGraphBuilder:
         assert data.edge_index.shape[0] == 2
         assert data.edge_index.dtype == torch.int64
 
-        # Edge Attributes: (E, 19) -> 3 unit vec + 16 RBF
-        assert data.edge_attr.shape == (E, 19)
+        # Edge Attributes: (E, 20) -> 3 unit vec + 16 RBF + 1 inter-chain flag
+        assert data.edge_attr.shape == (E, 20)
         assert data.edge_attr.dtype == torch.float32
 
     def test_no_divide_by_zero(self, builder, dummy_single_residue_protein):
