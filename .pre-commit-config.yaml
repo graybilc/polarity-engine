@@ -16,7 +16,7 @@ repos:
 
       - id: pytest
         name: pytest-suite
-        entry: uv run pytest
+        entry: env PYTHONDONTWRITEBYTECODE=1 uv run pytest
         language: system
         pass_filenames: false
         always_run: true

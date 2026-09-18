@@ -3,3 +3,13 @@
 .eggs/
 dist/
 build/
+
+# Python bytecode & cache directories
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Pytest / environment artifacts
+.pytest_cache/
+.venv/
