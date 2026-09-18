@@ -27,18 +27,31 @@ MOCK_PDB_CONTENT_1 = (
     "END\n"
 )
 
-MOCK_CIF_CONTENT = (
-    "data_mock_structure\n"
-    "loop_\n"
-    "_atom_site.group_PDB\n"
-    "_atom_site.auth_asym_id\n"
-    "_atom_site.label_atom_id\n"
-    "_atom_site.Cartn_x\n"
-    "_atom_site.Cartn_y\n"
-    "_atom_site.Cartn_z\n"
-    "ATOM  A  CA  12.345  23.456  34.567\n"
-    "ATOM  A  CA  13.100  24.200  35.300\n"
-)
+MOCK_CIF_CONTENT = """data_mock_structure
+#
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_alt_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.auth_asym_id
+_atom_site.label_seq_id
+_atom_site.auth_seq_id
+_atom_site.pdbx_PDB_ins_code
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.occupancy
+_atom_site.B_iso_or_equiv
+ATOM 1 C CA . VAL A A 1 1 ? 12.345 23.456 34.567 1.00 15.50
+ATOM 2 C CA . MET A A 2 2 ? 13.100 24.200 35.300 1.00 15.50
+ATOM 3 C CA . ALA B B 1 1 ? 20.000 30.000 40.000 1.00 22.10
+ATOM 4 C CA . ARG B B 2 2 ? 21.000 31.000 41.000 1.00 22.10
+#
+"""
 
 MOCK_PROTEIN_5RES = {
     "aa_list": ["ALA", "GLY", "SER", "TRP", "UNK"],

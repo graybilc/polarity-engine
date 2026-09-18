@@ -370,17 +370,6 @@ class StructureParser:
 
     @staticmethod
     def get_freesasa_result(file_path: Path) -> tuple[freesasa.Result, Any]:
-        """Parses a PDB or mmCIF file and calculates SASA via FreeSASA's BioPython bridge.
-
-        Args:
-            file_path (Path): Path to the structure file (.pdb or .cif/.mmcif).
-
-        Returns:
-            tuple[freesasa.Result, Any]: FreeSASA result and root tree node object.
-
-        Raises:
-            ValueError: If the file extension is unsupported or structure parsing fails.
-        """
         file_path = Path(file_path)
         file_ext = file_path.suffix.lower()
 
@@ -400,19 +389,22 @@ class StructureParser:
                 f"Failed to parse structure file '{file_path.name}': {e}"
             ) from e
 
-        # 1. Convert BioPython Structure -> freesasa.Structure
-        fs_structure = freesasa.structureFromBioPDB(bio_structure)
-
-        # 2. Run SASA calculation
-        result = freesasa.calc(fs_structure)
-
-        return result, fs_structure
+        try:
+            # Convert BioPython Structure -> freesasa.Structure
+            fs_structure = freesasa.structureFromBioPDB(bio_structure)
+            result = freesasa.calc(fs_structure)
+            return result, fs_structure
+        except Exception as e:
+            raise ValueError(
+                f"FreeSASA calculation failed for '{file_path.name}': {e}"
+            ) from e
 
     @staticmethod
     def extract_per_residue_sasa(
         result: freesasa.Result, fs_structure: freesasa.Structure
     ) -> dict[tuple[str, str], float]:
-        """Aggregates atomic SASA values per residue across the complex.
+        """
+        Aggregates atomic SASA values per residue across the complex.
 
         Args:
             result (freesasa.Result): FreeSASA computation result.
@@ -433,3 +425,93 @@ class StructureParser:
             residue_sasa_map[key] = residue_sasa_map.get(key, 0.0) + atom_area
 
         return residue_sasa_map
+
+    @classmethod
+    def parse(
+        cls, file_path: str | Path, chain_ids: list[str] | None = None
+    ) -> dict[str, Any]:
+        """
+        Parses coordinates, node metadata, and biophysical surface accessibility (SASA)
+
+        for a multi-chain complex in a single pipeline execution.
+
+        Args:
+            file_path: Path to .pdb or .cif/.mmcif structure file.
+            chain_ids: Optional list of target chain IDs to isolate. If None,
+              parses all available chains.
+
+        Returns:
+            dict containing:
+                - 'aa_list': list[str] of 3-letter residue codes (length N)
+                - 'coords': np.ndarray of shape (N, 3) float32
+                - 'nodes': list[tuple[str, str, str]] of (chain_id, res_num_str,
+                res_name)
+                - 'sasa_map': dict[tuple[str, str], float] mapping (chain_id,
+                res_num) -> Å²
+        """
+        path_obj = Path(file_path)
+
+        # Extract raw coordinates across specified or all chains
+        chain_coords = cls.get_alpha_carbon_coordinates(path_obj)
+
+        if chain_ids is not None:
+            chain_coords = {
+                c: data for c, data in chain_coords.items() if c in chain_ids
+            }
+
+        # Flatten per-chain arrays into unified complex-level N-length lists
+        all_aa, all_coords, all_nodes = [], [], []
+
+        for c_id, chain_data in chain_coords.items():
+            coords_arr = chain_data["coords"]
+            residues = chain_data["aa_residues"]
+
+            for i in range(len(coords_arr)):
+                res_obj_or_str = residues[i]
+
+                # Handle BioPython Residue object (PDB) vs. string name (mmCIF)
+                if hasattr(res_obj_or_str, "get_resname"):
+                    res_name = res_obj_or_str.get_resname()
+                    res_num = str(res_obj_or_str.id[1])
+                else:
+                    res_name = str(res_obj_or_str)
+                    res_num = str(i + 1)  # 1-based backbone index fallback
+
+                all_coords.append(coords_arr[i])
+                all_aa.append(res_name)
+                all_nodes.append((c_id, res_num, res_name))
+
+        # Compute SASA map across the entire complex
+        fs_result, fs_struct = cls.get_freesasa_result(path_obj)
+        sasa_map = cls.extract_per_residue_sasa(fs_result, fs_struct)
+
+        # Validation guardrail inside StructureParser.parse()
+        parsed_output = {
+            "aa_list": all_aa,
+            "coords": np.array(all_coords, dtype=np.float32),
+            "nodes": all_nodes,
+            "sasa_map": sasa_map,
+        }
+
+        # Ensure non-empty schema contracts
+        if (
+            not parsed_output["aa_list"]
+            or parsed_output["coords"].size == 0
+            or not parsed_output["nodes"]
+            or not parsed_output["sasa_map"]
+        ):
+            raise ValueError(
+                f"Failed to parse valid residue, coordinate, or SASA data from '{path_obj.name}'."
+            )
+
+        if len(parsed_output["aa_list"]) != len(parsed_output["coords"]) or len(
+            parsed_output["nodes"]
+        ) != len(parsed_output["aa_list"]):
+            raise ValueError(
+                f"Internal length mismatch in parsed output for '{path_obj.name}': "
+                f"got {len(parsed_output['aa_list'])} residues, "
+                f"{len(parsed_output['coords'])} coordinates, and "
+                f"{len(parsed_output['nodes'])} node metadata items."
+            )
+
+        return parsed_output
