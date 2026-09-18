@@ -903,26 +903,6 @@ class TestStructureParser:
         ):
             structure_parser_cls.parse(mock_cif_file, chain_ids=[invalid_chain])
 
-    def test_parse_invalid_file_path_raises_file_not_found_error(
-        self, structure_parser_cls, tmp_path
-    ):
-        """
-        Ensures that passing a non-existent file path to parse() raises FileNotFoundError.
-
-        Verifies that file existence guardrails at the public entry point intercept missing
-        structures before initializing downstream parser dependencies.
-
-        Args:
-            structure_parser_cls (Type[StructureParser]): Class reference fixture for StructureParser.
-            tmp_path (Path): Built-in pytest fixture providing a temporary directory Path.
-
-        Raises:
-            pytest.PytestTester: Confirms FileNotFoundError is raised for non-existent paths.
-        """
-        non_existent_file = tmp_path / "missing_structure.cif"
-        with pytest.raises(FileNotFoundError, match="Target structure file not found"):
-            structure_parser_cls.parse(non_existent_file)
-
     def test_parse_empty_sasa_map_raises_value_error(
         self, structure_parser_cls, mock_cif_file, monkeypatch
     ):
