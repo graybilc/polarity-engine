@@ -3,6 +3,7 @@
 
 import logging
 import numpy as np
+from pathlib import Path
 import torch
 import torch.nn as nn
 from torch_geometric.data import Data
@@ -33,6 +34,34 @@ AMINO_ACID_TO_INDEX = {
     "VAL": 19,
     "UNK": 20,  # Unknown / Non-standard
 }
+
+# Maximum Accessible Surface Area (maxASA) in square Angstroms (A^2)
+# Reference: Tien et al. (2013), PLoS ONE 8(11): e80635. (Theoretical scale)
+TIEN_MAX_ASA = {
+    "ALA": 129.0,
+    "ARG": 274.0,
+    "ASN": 195.0,
+    "ASP": 193.0,
+    "CYS": 167.0,
+    "GLU": 223.0,
+    "GLN": 225.0,
+    "GLY": 104.0,
+    "HIS": 224.0,
+    "ILE": 197.0,
+    "LEU": 201.0,
+    "LYS": 236.0,
+    "MET": 224.0,
+    "PHE": 240.0,
+    "PRO": 159.0,
+    "SER": 155.0,
+    "THR": 172.0,
+    "TRP": 285.0,
+    "TYR": 263.0,
+    "VAL": 174.0,
+}
+
+# Empirical average across standard 20 residues to handle unknown/non-standard AA classes
+DEFAULT_MAX_ASA = 197.0
 
 
 class GaussianRBF(nn.Module):
@@ -150,7 +179,8 @@ class ProteinGraphBuilder:
     def _distance_to_sparse_coo(
         self, dist_matrix: torch.Tensor, include_self_loops: bool = False
     ) -> tuple[torch.Tensor, int]:
-        """Converts a dense pairwise distance matrix to PyTorch Geometric COO edge_index format.
+        """
+        Converts a dense pairwise distance matrix to PyTorch Geometric COO edge_index format.
 
         Args:
             dist_matrix: Pairwise distance tensor of shape (N, N).
@@ -180,7 +210,8 @@ class ProteinGraphBuilder:
     def _compute_edge_geometric_attrs(
         self, coords: np.ndarray
     ) -> dict[str, torch.Tensor]:
-        """Computes sparse COO topology, displacement vectors, scalar distances, and unit direction vectors.
+        """
+        Computes sparse COO topology, displacement vectors, scalar distances, and unit direction vectors.
 
         Args:
             coords: NumPy array of C-alpha coordinates of shape (N, 3).
@@ -213,19 +244,78 @@ class ProteinGraphBuilder:
             "unit_vec": unit_vec,
         }
 
+    @staticmethod
+    def build_rsasa_node_tensor(
+        residues: list[tuple[str, str, str]], sasa_map: dict[tuple[str, str], float]
+    ) -> torch.Tensor:
+        """
+        Computes normalized rSASA tensor for node features using Tien et al. (2013).
+
+        Args:
+            residues: List of node residue metadata ordered by node index in PyG graph.
+            sasa_map: Dict mapping (chain_id, res_num) -> raw SASA in Å².
+
+        Returns:
+            torch.Tensor: FloatTensor of shape (num_nodes, 1) with values in [0.0, 1.0].
+        """
+        rsasa_values = []
+
+        for chain_id, res_num, res_name in residues:
+            raw_sasa = sasa_map.get((chain_id, str(res_num)), 0.0)
+            # Fallback 200 Å² for non-standard
+            max_asa = TIEN_MAX_ASA.get(res_name.upper(), DEFAULT_MAX_ASA)
+
+            # Calculate rSASA and clamp to [0.0, 1.0]
+            rsasa = min(max(raw_sasa / max_asa, 0.0), 1.0)
+            rsasa_values.append([rsasa])
+
+        return torch.tensor(rsasa_values, dtype=torch.float32)
+
+    @staticmethod
+    def _compute_inter_chain_flag(
+        edge_index: torch.Tensor, nodes: list[tuple[str, str, str]]
+    ) -> torch.Tensor:
+        """
+        Computes binary flag indicating if an edge crosses chain boundaries.
+
+        Args:
+            edge_index: Long tensor of shape (2, E).
+            nodes: List of (chain_id, res_num, res_name) node metadata of length N.
+
+        Returns:
+            torch.Tensor: Float32 tensor of shape (E, 1) where 1.0 indicates an
+            inter-subunit interface edge and 0.0 indicates an intra-chain edge.
+        """
+        src_indices = edge_index[0].tolist()
+        dst_indices = edge_index[1].tolist()
+
+        # Compare chain_id (index 0 of each node metadata tuple)
+        flags = [
+            [1.0] if nodes[i][0] != nodes[j][0] else [0.0]
+            for i, j in zip(src_indices, dst_indices)
+        ]
+        return torch.tensor(flags, dtype=torch.float32)
+
     def build_graph(
-        self, aa_list: list[str], coords_np: np.ndarray, name: str = ""
+        self,
+        aa_list: list[str],
+        coords_np: np.ndarray,
+        nodes: list[tuple[str, str, str]],
+        sasa_map: dict[tuple[str, str], float],
+        name: str = "",
     ) -> Data:
-        """Assembles node features, topology, edge features, and coordinates into a PyG Data object.
+        """
+        Assembles node features, topology, edge features, and coordinates into a PyG Data object.
 
         Args:
             aa_list: Sequence of 3-letter amino acid codes of length N.
             coords_np: NumPy array of C-alpha coordinates of shape (N, 3).
+            nodes: List of (chain_id, res_num_str, res_name_3let) corresponding to PyG nodes.
+            sasa_map: Dict mapping (chain_id, res_num_str) -> raw SASA in Å².
             name: Structural identifier or complex name metadata.
 
         Returns:
-            Data: PyTorch Geometric Data instance with x, edge_index, edge_attr, pos,
-            and name.
+            Data: PyTorch Geometric Data instance with x (N, 23), edge_index, edge_attr, pos, and name.
         """
         # Input Sanitization Guardrail
         if not np.isfinite(coords_np).all():
@@ -238,22 +328,36 @@ class ProteinGraphBuilder:
                 f"Length mismatch in structure '{name}': "
                 f"got {len(aa_list)} amino acids but {len(coords_np)} coordinate vectors."
             )
+        if len(nodes) != len(aa_list):
+            raise ValueError(
+                f"Length mismatch in structure '{name}': "
+                f"got {len(nodes)} residue node metadata items but {len(aa_list)} amino acids."
+            )
         coords = torch.from_numpy(coords_np).float()
 
-        # 1. Node Features: (N, 22)
-        x = self._encode_node_feature(aa_list)
+        # 1. Base Node Features: (N, 22) -> AA One-Hot + Sequence Scalars
+        x_base = self._encode_node_feature(aa_list)
 
-        # 2. Extract Geometric Vectors & Scalar Distances: (E, 3) and (E, 1)
+        # 2. Compute Relative SASA Node Feature: (N, 1)
+        rsasa_tensor = self.build_rsasa_node_tensor(nodes, sasa_map)
+
+        # 3. Concatenate Base Features + rSASA: (N, 22) cat (N, 1) -> (N, 23)
+        x = torch.cat([x_base, rsasa_tensor], dim=1)
+
+        # 4. Extract Geometric Vectors & Scalar Distances: (E, 3) and (E, 1)
         geom_attrs = self._compute_edge_geometric_attrs(coords_np)
         edge_index = geom_attrs["edge_index"]  # (2, E)
         unit_vec = geom_attrs["unit_vec"]  # (E, 3)
         dist_scalar = geom_attrs["dist_scalar"]  # (E, 1)
 
-        # 3. Apply Gaussian RBF Expansion: (E, 1) -> (E, 16)
+        # 5. Apply Gaussian RBF Expansion: (E, 1) -> (E, 16)
         rbf_out = self.rbf_module(dist_scalar)
 
-        # 4. Concatenate Direction Vectors + RBF Fingerprints: (E, 19)
-        edge_attr = torch.cat([unit_vec, rbf_out], dim=1)
+        # 6. Compute Inter-Subunit Interface Flag: (E, 1)
+        inter_chain_flag = self._compute_inter_chain_flag(edge_index, nodes)
+
+        # 7. Concatenate Direction Vectors + RBF Fingerprints + Interface Flag: (E, 20)
+        edge_attr = torch.cat([unit_vec, rbf_out, inter_chain_flag], dim=1)
 
         return Data(
             x=x, edge_index=edge_index, edge_attr=edge_attr, pos=coords, name=name
