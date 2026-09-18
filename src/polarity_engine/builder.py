@@ -210,7 +210,8 @@ class ProteinGraphBuilder:
     def _compute_edge_geometric_attrs(
         self, coords: np.ndarray
     ) -> dict[str, torch.Tensor]:
-        """Computes sparse COO topology, displacement vectors, scalar distances, and unit direction vectors.
+        """
+        Computes sparse COO topology, displacement vectors, scalar distances, and unit direction vectors.
 
         Args:
             coords: NumPy array of C-alpha coordinates of shape (N, 3).
@@ -247,7 +248,8 @@ class ProteinGraphBuilder:
     def build_rsasa_node_tensor(
         residues: list[tuple[str, str, str]], sasa_map: dict[tuple[str, str], float]
     ) -> torch.Tensor:
-        """Computes normalized rSASA tensor for node features using Tien et al. (2013).
+        """
+        Computes normalized rSASA tensor for node features using Tien et al. (2013).
 
         Args:
             residues: List of node residue metadata ordered by node index in PyG graph.
@@ -273,7 +275,8 @@ class ProteinGraphBuilder:
     def _compute_inter_chain_flag(
         edge_index: torch.Tensor, nodes: list[tuple[str, str, str]]
     ) -> torch.Tensor:
-        """Computes binary flag indicating if an edge crosses chain boundaries.
+        """
+        Computes binary flag indicating if an edge crosses chain boundaries.
 
         Args:
             edge_index: Long tensor of shape (2, E).
@@ -301,7 +304,8 @@ class ProteinGraphBuilder:
         sasa_map: dict[tuple[str, str], float],
         name: str = "",
     ) -> Data:
-        """Assembles node features, topology, edge features, and coordinates into a PyG Data object.
+        """
+        Assembles node features, topology, edge features, and coordinates into a PyG Data object.
 
         Args:
             aa_list: Sequence of 3-letter amino acid codes of length N.
