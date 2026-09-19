@@ -300,6 +300,8 @@ class ProteinGraphBuilder:
         self,
         aa_list: list[str],
         coords_np: np.ndarray,
+        b_factors_np: np.ndarray,
+        occupancies_np: np.ndarray,
         nodes: list[tuple[str, str, str]],
         sasa_map: dict[tuple[str, str], float],
         name: str = "",
@@ -310,53 +312,81 @@ class ProteinGraphBuilder:
         Args:
             aa_list: Sequence of 3-letter amino acid codes of length N.
             coords_np: NumPy array of C-alpha coordinates of shape (N, 3).
+            b_factors_np: NumPy array of residue B-factors of shape (N,).
+            occupancies_np: NumPy array of residue occupancies of shape (N,).
             nodes: List of (chain_id, res_num_str, res_name_3let) corresponding to PyG nodes.
             sasa_map: Dict mapping (chain_id, res_num_str) -> raw SASA in Å².
             name: Structural identifier or complex name metadata.
 
         Returns:
-            Data: PyTorch Geometric Data instance with x (N, 23), edge_index, edge_attr, pos, and name.
+            Data: PyTorch Geometric Data instance with x (N, 25), edge_index, edge_attr, pos, and name.
         """
-        # Input Sanitization Guardrail
+        # 1. Input Sanitization Guardrails
         if not np.isfinite(coords_np).all():
             raise ValueError(
                 f"Invalid coordinates in structure '{name}': input contains NaN or Inf values."
             )
+        if not np.isfinite(b_factors_np).all():
+            raise ValueError(
+                f"Invalid B-factors in structure '{name}': input contains NaN or Inf values."
+            )
+        if not np.isfinite(occupancies_np).all():
+            raise ValueError(
+                f"Invalid occupancies in structure '{name}': input contains NaN or Inf values."
+            )
 
-        if len(aa_list) != len(coords_np):
+        num_nodes = len(aa_list)
+        if len(coords_np) != num_nodes:
             raise ValueError(
                 f"Length mismatch in structure '{name}': "
-                f"got {len(aa_list)} amino acids but {len(coords_np)} coordinate vectors."
+                f"got {num_nodes} amino acids but {len(coords_np)} coordinate vectors."
             )
-        if len(nodes) != len(aa_list):
+        if len(b_factors_np) != num_nodes:
             raise ValueError(
                 f"Length mismatch in structure '{name}': "
-                f"got {len(nodes)} residue node metadata items but {len(aa_list)} amino acids."
+                f"got {num_nodes} amino acids but {len(b_factors)} B-factor values."
             )
+        if len(occupancies_np) != num_nodes:
+            raise ValueError(
+                f"Length mismatch in structure '{name}': "
+                f"got {num_nodes} amino acids but {len(occupancies)} occupancy values."
+            )
+        if len(nodes) != num_nodes:
+            raise ValueError(
+                f"Length mismatch in structure '{name}': "
+                f"got {len(nodes)} residue node metadata items but {num_nodes} amino acids."
+            )
+
         coords = torch.from_numpy(coords_np).float()
+        b_factors_tensor = torch.from_numpy(b_factors_np).float().unsqueeze(1)  # (N, 1)
+        occupancies_tensor = (
+            torch.from_numpy(occupancies_np).float().unsqueeze(1)
+        )  # (N, 1)
 
-        # 1. Base Node Features: (N, 22) -> AA One-Hot + Sequence Scalars
+        # 2. Base Node Features: (N, 22) -> AA One-Hot + Sequence Scalars
         x_base = self._encode_node_feature(aa_list)
 
-        # 2. Compute Relative SASA Node Feature: (N, 1)
+        # 3. Compute Relative SASA Node Feature: (N, 1)
         rsasa_tensor = self.build_rsasa_node_tensor(nodes, sasa_map)
 
-        # 3. Concatenate Base Features + rSASA: (N, 22) cat (N, 1) -> (N, 23)
-        x = torch.cat([x_base, rsasa_tensor], dim=1)
+        # 4. Concatenate Features: (N, 22) cat (N, 1) cat (N, 1) cat (N, 1) -> (N, 25)
+        x = torch.cat(
+            [x_base, rsasa_tensor, b_factors_tensor, occupancies_tensor], dim=1
+        )
 
-        # 4. Extract Geometric Vectors & Scalar Distances: (E, 3) and (E, 1)
+        # 5. Extract Geometric Vectors & Scalar Distances: (E, 3) and (E, 1)
         geom_attrs = self._compute_edge_geometric_attrs(coords_np)
         edge_index = geom_attrs["edge_index"]  # (2, E)
         unit_vec = geom_attrs["unit_vec"]  # (E, 3)
         dist_scalar = geom_attrs["dist_scalar"]  # (E, 1)
 
-        # 5. Apply Gaussian RBF Expansion: (E, 1) -> (E, 16)
+        # 6. Apply Gaussian RBF Expansion: (E, 1) -> (E, 16)
         rbf_out = self.rbf_module(dist_scalar)
 
-        # 6. Compute Inter-Subunit Interface Flag: (E, 1)
+        # 7. Compute Inter-Subunit Interface Flag: (E, 1)
         inter_chain_flag = self._compute_inter_chain_flag(edge_index, nodes)
 
-        # 7. Concatenate Direction Vectors + RBF Fingerprints + Interface Flag: (E, 20)
+        # 8. Concatenate Edge Features: (E, 20)
         edge_attr = torch.cat([unit_vec, rbf_out, inter_chain_flag], dim=1)
 
         return Data(

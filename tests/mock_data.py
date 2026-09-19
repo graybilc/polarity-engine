@@ -53,7 +53,6 @@ ATOM 4 C CA . ARG B B 2 2 ? 21.000 31.000 41.000 1.00 22.10
 #
 """
 
-import numpy as np
 
 MOCK_PROTEIN_5RES = {
     "aa_list": ["ALA", "GLY", "SER", "TRP", "UNK"],
@@ -140,3 +139,8 @@ MOCK_COORDS_NP = [
     [7.6, 0.0, 0.0],
     [11.4, 0.0, 0.0],
 ]
+# Corresponding B-factors (crystallographic temperature factors / flexibility)
+MOCK_B_FACTORS_NP = np.array([12.5, 18.0, 25.4, 30.1], dtype=np.float32)
+
+# Corresponding occupancies (atomic presence confidence in structure)
+MOCK_OCCUPANCIES_NP = np.array([1.0, 1.0, 0.85, 1.0], dtype=np.float32)

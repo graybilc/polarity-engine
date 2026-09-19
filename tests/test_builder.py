@@ -14,11 +14,18 @@ from tests.mock_data import (
     MOCK_SASA_MAP,
     MOCK_AA_LIST,
     MOCK_COORDS_NP,
+    MOCK_B_FACTORS_NP,
+    MOCK_OCCUPANCIES_NP,
     MOCK_PROTEIN_5RES,
     MOCK_PROTEIN_CORRUPTED_NAN,
     MOCK_PROTEIN_SINGLE_RES,
     MOCK_PROTEIN_CORRUPTED_INF,
 )
+
+SEQ_POS_COL = 21
+RSASA_COL = 22
+B_FACTOR_COL = 23
+OCCUPANCY_COL = 24
 
 
 @pytest.fixture
@@ -37,6 +44,8 @@ def dummy_5_residue_protein():
     return (
         MOCK_PROTEIN_5RES["aa_list"],
         MOCK_PROTEIN_5RES["coords"],
+        MOCK_PROTEIN_5RES["b_factors"],
+        MOCK_PROTEIN_5RES["occupancies"],
         MOCK_PROTEIN_5RES["nodes"],
         MOCK_PROTEIN_5RES["sasa_map"],
         MOCK_PROTEIN_5RES["name"],
@@ -51,6 +60,8 @@ def dummy_single_residue_protein():
     return (
         MOCK_PROTEIN_SINGLE_RES["aa_list"],
         MOCK_PROTEIN_SINGLE_RES["coords"],
+        MOCK_PROTEIN_SINGLE_RES["b_factors"],
+        MOCK_PROTEIN_SINGLE_RES["occupancies"],
         MOCK_PROTEIN_SINGLE_RES["nodes"],
         MOCK_PROTEIN_SINGLE_RES["sasa_map"],
         MOCK_PROTEIN_SINGLE_RES["name"],
@@ -65,6 +76,8 @@ def corrupted_protein_nan():
     return (
         MOCK_PROTEIN_CORRUPTED_NAN["aa_list"],
         MOCK_PROTEIN_CORRUPTED_NAN["coords"],
+        MOCK_PROTEIN_CORRUPTED_NAN["b_factors"],
+        MOCK_PROTEIN_CORRUPTED_NAN["occupancies"],
         MOCK_PROTEIN_CORRUPTED_NAN["nodes"],
         MOCK_PROTEIN_CORRUPTED_NAN["sasa_map"],
         MOCK_PROTEIN_CORRUPTED_NAN["name"],
@@ -79,6 +92,8 @@ def corrupted_protein_inf():
     return (
         MOCK_PROTEIN_CORRUPTED_INF["aa_list"],
         MOCK_PROTEIN_CORRUPTED_INF["coords"],
+        MOCK_PROTEIN_CORRUPTED_INF["b_factors"],
+        MOCK_PROTEIN_CORRUPTED_INF["occupancies"],
         MOCK_PROTEIN_CORRUPTED_INF["nodes"],
         MOCK_PROTEIN_CORRUPTED_INF["sasa_map"],
         MOCK_PROTEIN_CORRUPTED_INF["name"],
@@ -101,17 +116,33 @@ class TestProteinGraphBuilder:
         Assert:
             Verify output tensors match expected shape contracts and torch dtypes.
         """
-        aa_list, coords, nodes, sasa_map, name = dummy_5_residue_protein
+        aa_list, coords, b_factors, occupancies, nodes, sasa_map, name = (
+            dummy_5_residue_protein
+        )
         data = builder.build_graph(
-            aa_list=aa_list, coords_np=coords, nodes=nodes, sasa_map=sasa_map, name=name
+            aa_list=aa_list,
+            coords_np=coords,
+            b_factors_np=b_factors,
+            occupancies_np=occupancies,
+            nodes=nodes,
+            sasa_map=sasa_map,
+            name=name,
         )
 
         N = len(aa_list)
         E = data.edge_index.shape[1]
 
-        # Node Features: (N, 23) -> 21 one-hot + 1 sequence position + 1 rSASA
-        assert data.x.shape == (N, 23)
+        # Node Features: (N, 25) -> 21 one-hot + 1 sequence position + 1 rSASA + 1 B-factor + 1 occupancy
+        assert data.x.shape == (N, 25)
         assert data.x.dtype == torch.float32
+
+        # Verify B-factors and Occupancies in node feature tensor slices
+        assert torch.allclose(
+            data.x[:, B_FACTOR_COL], torch.from_numpy(b_factors).float()
+        )
+        assert torch.allclose(
+            data.x[:, OCCUPANCY_COL], torch.from_numpy(occupancies).float()
+        )
 
         # Coordinates: (N, 3)
         assert data.pos.shape == (N, 3)
@@ -137,17 +168,21 @@ class TestProteinGraphBuilder:
             Verify output node features contain no NaNs, sequence position
             defaults to 0.0, and rSASA is computed properly.
         """
-        aa_list, coords, nodes, sasa_map, name = dummy_single_residue_protein
+        aa_list, coords, b_factors, occupancies, nodes, sasa_map, name = (
+            dummy_single_residue_protein
+        )
         data = builder.build_graph(
             aa_list=aa_list,
             coords_np=coords,
+            b_factors_np=b_factors,
+            occupancies_np=occupancies,
             nodes=nodes,
             sasa_map=sasa_map,
             name=name,
         )
 
         # 1. Verify tensor shapes
-        assert data.x.shape == (1, 23)
+        assert data.x.shape == (1, 25)
         assert data.edge_index.shape == (2, 0)
         assert data.edge_attr.shape == (0, 19)
 
@@ -158,9 +193,9 @@ class TestProteinGraphBuilder:
 
         # Explicitly extract feature columns for clarity
         # Index -2: Normalized sequence position i / max(N-1, 1)
-        seq_pos_scalar = data.x[0, -2].item()
+        seq_pos_scalar = data.x[0, SEQ_POS_COL].item()
         # Index -1: Relative SASA in [0.0, 1.0]
-        rsasa_scalar = data.x[0, -1].item()
+        rsasa_scalar = data.x[0, RSASA_COL].item()
 
         assert (
             seq_pos_scalar == 0.0
@@ -178,9 +213,13 @@ class TestProteinGraphBuilder:
         Act & Assert:
             Invoke build_graph and catch ValueError with expected message context.
         """
-        aa_list, coords, nodes, sasa_map, name = corrupted_protein_nan
+        aa_list, coords, b_factors, occupancies, nodes, sasa_map, name = (
+            corrupted_protein_nan
+        )
         with pytest.raises(ValueError, match="Invalid coordinates in structure"):
-            builder.build_graph(aa_list, coords, nodes, sasa_map, name=name)
+            builder.build_graph(
+                aa_list, coords, b_factors, occupancies, nodes, sasa_map, name=name
+            )
 
     def test_corrupt_protein_inf(self, builder, corrupted_protein_inf):
         """
@@ -191,9 +230,13 @@ class TestProteinGraphBuilder:
         Act & Assert:
             Invoke build_graph and catch ValueError with expected message context.
         """
-        aa_list, coords, nodes, sasa_map, name = corrupted_protein_inf
+        aa_list, coords, b_factors, occupancies, nodes, sasa_map, name = (
+            corrupted_protein_inf
+        )
         with pytest.raises(ValueError, match="Invalid coordinates in structure"):
-            builder.build_graph(aa_list, coords, nodes, sasa_map, name=name)
+            builder.build_graph(
+                aa_list, coords, b_factors, occupancies, nodes, sasa_map, name=name
+            )
 
     def test_corrupt_protein_nodes_mismatch(self, builder, dummy_5_residue_protein):
         """
@@ -201,12 +244,14 @@ class TestProteinGraphBuilder:
 
         Arrange:
             dummy_single_residue_protein fixture providing 1-residue sequence,
-            coordinates, node metadata, and SASA map, and truncate nodes to
+            coordinates, b_factors, occupancies, node metadata, and SASA map, and truncate nodes to
             simulate a missing metadata entry.
         Act & Assert:
             Invoke build_graph and catch ValueError with expected message context.
         """
-        aa_list, coords, nodes, sasa_map, name = dummy_5_residue_protein
+        aa_list, coords, b_factors, occupancies, nodes, sasa_map, name = (
+            dummy_5_residue_protein
+        )
 
         # Truncate nodes to simulate a missing metadata entry (len = 4 vs len = 5)
         truncated_nodes = nodes[:-1]
@@ -215,6 +260,8 @@ class TestProteinGraphBuilder:
             builder.build_graph(
                 aa_list=aa_list,
                 coords_np=coords,
+                b_factors_np=b_factors,
+                occupancies_np=occupancies,
                 nodes=truncated_nodes,
                 sasa_map=sasa_map,
                 name=name,
@@ -226,15 +273,19 @@ class TestProteinGraphBuilder:
 
         Arrange:
             dummy_5_residue_protein fixture providing 5-residue sequence,
-            coordinates, node metadata, and SASA map.
+            coordinates, b-factors, occupancies, node metadata, and SASA map.
         Act:
             Invoke build_graph of ProteinGraphBuilder to construct PyG Data object.
         Assert:
             Direction vectors in edge_attr[:, :3] have unit norm (~1.0)
 
         """
-        aa_list, coords, nodes, sasa_map, name = dummy_5_residue_protein
-        data = builder.build_graph(aa_list, coords, nodes, sasa_map, name=name)
+        aa_list, coords, b_factors, occupancies, nodes, sasa_map, name = (
+            dummy_5_residue_protein
+        )
+        data = builder.build_graph(
+            aa_list, coords, b_factors, occupancies, nodes, sasa_map, name=name
+        )
 
         unit_vecs = data.edge_attr[:, :3]
         norms = torch.linalg.vector_norm(unit_vecs, dim=-1)
@@ -248,17 +299,21 @@ class TestProteinGraphBuilder:
 
         Arrange:
             dummy_5_residue_protein fixture providing 5-residue sequence and
-            coordinates, node metadata, and SASA map.
+            coordinates, b-factors, occupancies, node metadata, and SASA map.
         Act:
             Invoke build_graph of ProteinGraphBuilder to construct PyG Data object.
         Assert:
             Verifies sequence position scalar stays strictly bounded in [0.0, 1.0].
         """
-        aa_list, coords, nodes, sasa_map, name = dummy_5_residue_protein
-        data = builder.build_graph(aa_list, coords, nodes, sasa_map, name=name)
+        aa_list, coords, b_factors, occupancies, nodes, sasa_map, name = (
+            dummy_5_residue_protein
+        )
+        data = builder.build_graph(
+            aa_list, coords, b_factors, occupancies, nodes, sasa_map, name=name
+        )
 
         # Sequence position is now column index -2 (index 21 out of 23)
-        seq_positions = data.x[:, -2]
+        seq_positions = data.x[:, SEQ_POS_COL]
         assert seq_positions[0].item() == 0.0
         assert seq_positions[-1].item() == 1.0
         assert (seq_positions >= 0.0).all() and (seq_positions <= 1.0).all()
@@ -275,8 +330,12 @@ class TestProteinGraphBuilder:
         Assert:
             Validates distance cutoff filtering and edge symmetry.
         """
-        aa_list, coords, nodes, sasa_map, name = dummy_5_residue_protein
-        data = builder.build_graph(aa_list, coords, nodes, sasa_map, name=name)
+        aa_list, coords, b_factors, occupancies, nodes, sasa_map, name = (
+            dummy_5_residue_protein
+        )
+        data = builder.build_graph(
+            aa_list, coords, b_factors, occupancies, nodes, sasa_map, name=name
+        )
 
         # Filter out self-loops (i == j) to inspect inter-node connectivity
         edge_index = data.edge_index
@@ -297,14 +356,18 @@ class TestProteinGraphBuilder:
 
         Arrange:
             dummy_5_residue_protein fixture providing 5-residue sequence and
-            coordinates, node metadata, and SASA map.
+            coordinates, b_factors, occupancies, node metadata, and SASA map.
         Act:
             Invoke build_graph of ProteinGraphBuilder to construct PyG Data object.
         Assert:
             Verify for every edge (i -> j), the reverse edge (j -> i) exists.
         """
-        aa_list, coords, nodes, sasa_map, name = dummy_5_residue_protein
-        data = builder.build_graph(aa_list, coords, nodes, sasa_map, name=name)
+        aa_list, coords, b_factors, occupancies, nodes, sasa_map, name = (
+            dummy_5_residue_protein
+        )
+        data = builder.build_graph(
+            aa_list, coords, b_factors, occupancies, nodes, sasa_map, name=name
+        )
 
         edge_index = data.edge_index
         # Transpose edges to set of tuples (i, j)
@@ -344,14 +407,14 @@ class TestProteinGraphBuilder:
 
     def test_build_graph_with_mock_rsasa(self, builder):
         """
-        Verifies build_graph outputs (N, 23) tensor using imported mock data.
+        Verifies build_graph outputs (N, 25) tensor using imported mock data.
 
         Arrange:
             Prepare 4-residue coordinate array, node metadata, and SASA map from standardized mock data.
         Act:
             Invoke build_graph to generate PyG Data instance.
         Assert:
-            Verify node feature matrix x has shape (4, 23) and that column index -1 exactly matches
+            Verify node feature matrix x has shape (4, 25) and that column index -1 exactly matches
             the expected rSASA values [0.5, 0.0, 0.5, 1.0].
         """
         coords_np = np.array(MOCK_COORDS_NP, dtype=np.float32)
@@ -359,14 +422,16 @@ class TestProteinGraphBuilder:
         data = builder.build_graph(
             aa_list=MOCK_AA_LIST,
             coords_np=coords_np,
+            b_factors_np=MOCK_B_FACTORS_NP,
+            occupancies_np=MOCK_OCCUPANCIES_NP,
             nodes=MOCK_NODES,
             sasa_map=MOCK_SASA_MAP,
             name="mock_complex",
         )
 
-        # Validate output tensor dimension (22 base features + 1 rSASA = 23)
-        assert data.x.shape == (4, 23)
+        # Validate output tensor dimension (22 base features + 1 rSASA + 1 b_factors, 1 occupancies = 25)
+        assert data.x.shape == (4, 25)
 
         # Verify that the last feature column corresponds to the computed rSASA values
-        rsasa_column = data.x[:, -1]
+        rsasa_column = data.x[:, RSASA_COL]
         assert torch.allclose(rsasa_column, torch.tensor([0.5, 0.0, 0.5, 1.0]))
