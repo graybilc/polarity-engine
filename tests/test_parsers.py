@@ -763,7 +763,7 @@ class TestStructureParser:
         Validates that StructureParser.parse() enforces full schema contracts for multi-chain complexes.
 
         Verifies that calling the unified parse() method on a valid PDBx/mmCIF structure
-        file produces a fully-populated dictionary containing all four mandatory keys required by
+        file produces a fully-populated dictionary containing all six mandatory keys required by
         downstream PyTorch Geometric graph construction modules.
 
         Args:
@@ -778,10 +778,14 @@ class TestStructureParser:
             "A": {
                 "coords": [np.array([1.0, 2.0, 3.0]), np.array([4.0, 5.0, 6.0])],
                 "aa_residues": ["VAL", "MET"],
+                "b_factors": np.array([10.0, 12.0], dtype=np.float32),
+                "occupancies": np.array([1.0, 1.0], dtype=np.float32),
             },
             "B": {
                 "coords": [np.array([7.0, 8.0, 9.0]), np.array([10.0, 11.0, 12.0])],
                 "aa_residues": ["ALA", "ARG"],
+                "b_factors": np.array([15.0, 20.0], dtype=np.float32),
+                "occupancies": np.array([1.0, 0.5], dtype=np.float32),
             },
         }
         monkeypatch.setattr(
@@ -810,16 +814,25 @@ class TestStructureParser:
         # Execute parse
         parsed_output = structure_parser_cls.parse(mock_cif_file)
 
-        # Assert full schema contract
+        # Assert full schema contract (all 6 keys)
         assert "aa_list" in parsed_output
         assert "coords" in parsed_output
+        assert "b_factors" in parsed_output
+        assert "occupancies" in parsed_output
         assert "nodes" in parsed_output
         assert "sasa_map" in parsed_output
 
+        # Assert length and shape alignment
         assert len(parsed_output["aa_list"]) == 4
         assert parsed_output["coords"].shape == (4, 3)
+        assert parsed_output["b_factors"].shape == (4,)
+        assert parsed_output["occupancies"].shape == (4,)
         assert len(parsed_output["nodes"]) == 4
         assert len(parsed_output["sasa_map"]) == 4
+
+        # Assert dtype accuracy
+        assert parsed_output["b_factors"].dtype == np.float32
+        assert parsed_output["occupancies"].dtype == np.float32
 
     def test_parse_chain_filtering_restricts_output(
         self, structure_parser_cls, mock_cif_file, monkeypatch
@@ -828,7 +841,8 @@ class TestStructureParser:
         Validates that StructureParser.parse() isolates user-specified chains.
 
         Tests the optional chain_ids parameter to ensure that coordinate arrays, residue lists,
-        and node metadata tuples are strictly filtered to contain only residues belonging to requested chains.
+        B-factors, occupancies, and node metadata tuples are strictly filtered to contain only
+        residues belonging to requested chains.
 
         Args:
             structure_parser_cls (Type[StructureParser]): Class reference fixture for StructureParser.
@@ -844,10 +858,14 @@ class TestStructureParser:
             "A": {
                 "coords": [np.array([1.0, 2.0, 3.0]), np.array([4.0, 5.0, 6.0])],
                 "aa_residues": ["VAL", "MET"],
+                "b_factors": np.array([10.0, 12.0], dtype=np.float32),
+                "occupancies": np.array([1.0, 1.0], dtype=np.float32),
             },
             "B": {
                 "coords": [np.array([7.0, 8.0, 9.0]), np.array([10.0, 11.0, 12.0])],
                 "aa_residues": ["ALA", "ARG"],
+                "b_factors": np.array([15.0, 20.0], dtype=np.float32),
+                "occupancies": np.array([1.0, 0.5], dtype=np.float32),
             },
         }
         monkeypatch.setattr(
@@ -883,6 +901,8 @@ class TestStructureParser:
             target_chain
         }, f"Expected only chain '{target_chain}', found {extracted_chains}"
         assert len(parsed_filtered["aa_list"]) == 2
+        assert len(parsed_filtered["b_factors"]) == 2
+        assert len(parsed_filtered["occupancies"]) == 2
 
     def test_parse_nonexistent_chain_raises_value_error(
         self, structure_parser_cls, mock_cif_file

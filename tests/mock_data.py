@@ -53,6 +53,8 @@ ATOM 4 C CA . ARG B B 2 2 ? 21.000 31.000 41.000 1.00 22.10
 #
 """
 
+import numpy as np
+
 MOCK_PROTEIN_5RES = {
     "aa_list": ["ALA", "GLY", "SER", "TRP", "UNK"],
     "coords": np.array(
@@ -65,6 +67,8 @@ MOCK_PROTEIN_5RES = {
         ],
         dtype=np.float32,
     ),
+    "b_factors": np.array([12.5, 18.0, 22.4, 35.1, 40.0], dtype=np.float32),
+    "occupancies": np.array([1.0, 1.0, 0.85, 1.0, 0.50], dtype=np.float32),
     "nodes": [
         ("A", "1", "ALA"),
         ("A", "2", "GLY"),
@@ -85,6 +89,8 @@ MOCK_PROTEIN_5RES = {
 MOCK_PROTEIN_SINGLE_RES = {
     "aa_list": ["ALA"],
     "coords": np.array([[0.0, 0.0, 0.0]], dtype=np.float32),
+    "b_factors": np.array([15.0], dtype=np.float32),
+    "occupancies": np.array([1.0], dtype=np.float32),
     "nodes": [("A", "1", "ALA")],
     "sasa_map": {("A", "1"): 64.5},
     "name": "mock_single_res",
@@ -93,6 +99,8 @@ MOCK_PROTEIN_SINGLE_RES = {
 MOCK_PROTEIN_CORRUPTED_NAN = {
     "aa_list": ["ALA", "GLY"],
     "coords": np.array([[0.0, 0.0, 0.0], [np.nan, 0.0, 0.0]], dtype=np.float32),
+    "b_factors": np.array([12.5, 18.0], dtype=np.float32),
+    "occupancies": np.array([1.0, 1.0], dtype=np.float32),
     "nodes": [("A", "1", "ALA"), ("A", "2", "GLY")],
     "sasa_map": {("A", "1"): 64.5, ("A", "2"): 0.0},
     "name": "mock_corrupted_nan",
@@ -101,6 +109,8 @@ MOCK_PROTEIN_CORRUPTED_NAN = {
 MOCK_PROTEIN_CORRUPTED_INF = {
     "aa_list": ["ALA", "GLY"],
     "coords": np.array([[0.0, 0.0, 0.0], [np.inf, 0.0, 0.0]], dtype=np.float32),
+    "b_factors": np.array([12.5, 18.0], dtype=np.float32),
+    "occupancies": np.array([1.0, 1.0], dtype=np.float32),
     "nodes": [("A", "1", "ALA"), ("A", "2", "GLY")],
     "sasa_map": {("A", "1"): 64.5, ("A", "2"): 0.0},
     "name": "mock_corrupted_inf",

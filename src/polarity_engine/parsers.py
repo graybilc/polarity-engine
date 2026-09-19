@@ -438,9 +438,8 @@ class StructureParser:
         cls, file_path: str | Path, chain_ids: list[str] | None = None
     ) -> dict[str, Any]:
         """
-        Parses coordinates, node metadata, and biophysical surface accessibility (SASA)
-
-        for a multi-chain complex in a single pipeline execution.
+        Parses coordinates, node metadata, B-factors, occupancies, and biophysical
+        surface accessibility (SASA) for a multi-chain complex in a single pipeline execution.
 
         Args:
             file_path: Path to .pdb or .cif/.mmcif structure file.
@@ -451,10 +450,10 @@ class StructureParser:
             dict containing:
                 - 'aa_list': list[str] of 3-letter residue codes (length N)
                 - 'coords': np.ndarray of shape (N, 3) float32
-                - 'nodes': list[tuple[str, str, str]] of (chain_id, res_num_str,
-                res_name)
-                - 'sasa_map': dict[tuple[str, str], float] mapping (chain_id,
-                res_num) -> Å²
+                - 'b_factors': np.ndarray of shape (N,) float32
+                - 'occupancies': np.ndarray of shape (N,) float32
+                - 'nodes': list[tuple[str, str, str]] of (chain_id, res_num_str, res_name)
+                - 'sasa_map': dict[tuple[str, str], float] mapping (chain_id, res_num) -> Å²
         """
         path_obj = Path(file_path)
 
@@ -467,11 +466,19 @@ class StructureParser:
             }
 
         # Flatten per-chain arrays into unified complex-level N-length lists
-        all_aa, all_coords, all_nodes = [], [], []
+        all_aa, all_coords, all_b_factors, all_occupancies, all_nodes = (
+            [],
+            [],
+            [],
+            [],
+            [],
+        )
 
         for c_id, chain_data in chain_coords.items():
             coords_arr = chain_data["coords"]
             residues = chain_data["aa_residues"]
+            b_factors = chain_data["b_factors"]
+            occupancies = chain_data["occupancies"]
 
             for i in range(len(coords_arr)):
                 res_item = residues[i]
@@ -480,7 +487,7 @@ class StructureParser:
                 if hasattr(res_item, "get_resname"):
                     res_name = res_item.get_resname()
                     res_num = str(res_item.id[1])
-                # 2. Handle Tuple returned by fast mmCIF parser: (res_num_str, res_name)
+                # 2. Handle Tuple returned by fast mmCIF/PDB parsers: (res_num_str, res_name)
                 elif isinstance(res_item, (tuple, list)):
                     res_num = str(res_item[0])
                     res_name = str(res_item[1])
@@ -491,15 +498,20 @@ class StructureParser:
 
                 all_coords.append(coords_arr[i])
                 all_aa.append(res_name)
+                all_b_factors.append(b_factors[i])
+                all_occupancies.append(occupancies[i])
                 all_nodes.append((c_id, res_num, res_name))
+
         # Compute SASA map across the entire complex
         fs_result, fs_struct = cls.get_freesasa_result(path_obj)
         sasa_map = cls.extract_per_residue_sasa(fs_result, fs_struct)
 
-        # Validation guardrail inside StructureParser.parse()
+        # Assemble schema output payload
         parsed_output = {
             "aa_list": all_aa,
             "coords": np.array(all_coords, dtype=np.float32),
+            "b_factors": np.array(all_b_factors, dtype=np.float32),
+            "occupancies": np.array(all_occupancies, dtype=np.float32),
             "nodes": all_nodes,
             "sasa_map": sasa_map,
         }
@@ -508,6 +520,8 @@ class StructureParser:
         if (
             not parsed_output["aa_list"]
             or parsed_output["coords"].size == 0
+            or parsed_output["b_factors"].size == 0
+            or parsed_output["occupancies"].size == 0
             or not parsed_output["nodes"]
             or not parsed_output["sasa_map"]
         ):
@@ -515,13 +529,20 @@ class StructureParser:
                 f"Failed to parse valid residue, coordinate, or SASA data from '{path_obj.name}'."
             )
 
-        if len(parsed_output["aa_list"]) != len(parsed_output["coords"]) or len(
-            parsed_output["nodes"]
-        ) != len(parsed_output["aa_list"]):
+        n_nodes = len(parsed_output["aa_list"])
+        if not (
+            len(parsed_output["coords"])
+            == len(parsed_output["nodes"])
+            == len(parsed_output["b_factors"])
+            == len(parsed_output["occupancies"])
+            == n_nodes
+        ):
             raise ValueError(
                 f"Internal length mismatch in parsed output for '{path_obj.name}': "
-                f"got {len(parsed_output['aa_list'])} residues, "
-                f"{len(parsed_output['coords'])} coordinates, and "
+                f"got {n_nodes} residues, "
+                f"{len(parsed_output['coords'])} coordinates, "
+                f"{len(parsed_output['b_factors'])} b_factors, "
+                f"{len(parsed_output['occupancies'])} occupancies, and "
                 f"{len(parsed_output['nodes'])} node metadata items."
             )
 
