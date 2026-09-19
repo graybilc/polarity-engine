@@ -467,20 +467,24 @@ class StructureParser:
             residues = chain_data["aa_residues"]
 
             for i in range(len(coords_arr)):
-                res_obj_or_str = residues[i]
+                res_item = residues[i]
 
-                # Handle BioPython Residue object (PDB) vs. string name (mmCIF)
-                if hasattr(res_obj_or_str, "get_resname"):
-                    res_name = res_obj_or_str.get_resname()
-                    res_num = str(res_obj_or_str.id[1])
+                # 1. Handle BioPython Residue object
+                if hasattr(res_item, "get_resname"):
+                    res_name = res_item.get_resname()
+                    res_num = str(res_item.id[1])
+                # 2. Handle Tuple returned by fast mmCIF parser: (res_num_str, res_name)
+                elif isinstance(res_item, (tuple, list)):
+                    res_num = str(res_item[0])
+                    res_name = str(res_item[1])
+                # 3. Fallback for raw string names
                 else:
-                    res_name = str(res_obj_or_str)
-                    res_num = str(i + 1)  # 1-based backbone index fallback
+                    res_name = str(res_item)
+                    res_num = str(i + 1)
 
                 all_coords.append(coords_arr[i])
                 all_aa.append(res_name)
                 all_nodes.append((c_id, res_num, res_name))
-
         # Compute SASA map across the entire complex
         fs_result, fs_struct = cls.get_freesasa_result(path_obj)
         sasa_map = cls.extract_per_residue_sasa(fs_result, fs_struct)
