@@ -16,10 +16,12 @@ repos:
 
       - id: pytest
         name: pytest-suite
-        entry: env PYTHONDONTWRITEBYTECODE=1 uv run pytest
+        entry: uv run pytest
         language: system
         pass_filenames: false
         always_run: true
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
 
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v3.2.0

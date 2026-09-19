@@ -266,16 +266,14 @@ class StructureParser:
         ca_coordinates, aa_residues, b_factors, occupancies = [], [], [], []
 
         for residue in chain:
-            # Skip heteroatoms/water and verify CA exists
             if residue.id[0] == " " and "CA" in residue:
                 atom = residue["CA"]
-
-                # Unpack disordered atoms dynamically to get the primary conformation
                 if atom.is_disordered():
                     atom = atom.selected_child
 
                 ca_coordinates.append(atom.get_coord())
-                aa_residues.append(atom.get_residue())
+                # Store tuple: (res_num_str, res_name)
+                aa_residues.append((str(residue.id[1]), residue.get_resname()))
                 b_factors.append(atom.get_bfactor())
                 occupancies.append(atom.get_occupancy())
 
@@ -306,6 +304,13 @@ class StructureParser:
             chain_data (dict[str, np.ndarray]): dict with chain_id as the key and CA coordinates,
             amino acid residues, B-factor, and Occupancy in the specified chain.
         """
+        # Prefer author sequence numbers (auth_seq_id); fallback to label_seq_id if needed
+        seq_key = (
+            "_atom_site.auth_seq_id"
+            if "_atom_site.auth_seq_id" in mmcif_dict
+            else "_atom_site.label_seq_id"
+        )
+
         required_keys = [
             "_atom_site.group_PDB",
             "_atom_site.auth_asym_id",
@@ -314,8 +319,9 @@ class StructureParser:
             "_atom_site.Cartn_y",
             "_atom_site.Cartn_z",
             "_atom_site.auth_comp_id",
-            "_atom_site.B_iso_or_equiv",  # B-factor / local resolution proxy
-            "_atom_site.occupancy",  # Occupancy fraction
+            seq_key,  # <--- Extract residue sequence numbers!
+            "_atom_site.B_iso_or_equiv",
+            "_atom_site.occupancy",
         ]
 
         for key in required_keys:
@@ -332,8 +338,8 @@ class StructureParser:
 
         ca_coordinates, aa_residues, b_factors, occupancies = [], [], [], []
 
-        # Parallel iteration over the coordinate columns
-        for group, chain, atom_name, x, y, z, aa, b_val, occ_val in zip(
+        # Parallel iteration over coordinate columns
+        for group, chain, atom_name, x, y, z, aa, seq_num, b_val, occ_val in zip(
             cols["_atom_site.group_PDB"],
             cols["_atom_site.auth_asym_id"],
             cols["_atom_site.label_atom_id"],
@@ -341,14 +347,15 @@ class StructureParser:
             cols["_atom_site.Cartn_y"],
             cols["_atom_site.Cartn_z"],
             cols["_atom_site.auth_comp_id"],
+            cols[seq_key],
             cols["_atom_site.B_iso_or_equiv"],
             cols["_atom_site.occupancy"],
         ):
-            # Isolate standard polymer atoms (ATOM), the target chain, and Alpha Carbons (CA)
             if group == "ATOM" and chain == chain_id and atom_name == "CA":
                 try:
                     ca_coordinates.append([float(x), float(y), float(z)])
-                    aa_residues.append(str(aa))
+                    # Store tuple: (res_num_str, res_name) e.g., ("248", "ILE")
+                    aa_residues.append((str(seq_num), str(aa)))
                     b_factors.append(float(b_val))
                     occupancies.append(float(occ_val))
                 except ValueError as e:

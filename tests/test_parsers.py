@@ -521,11 +521,13 @@ class TestStructureParser:
         # Pack atoms into residues
         mock_res_1 = MagicMock()
         mock_res_1.id = (" ", 1, " ")
+        mock_res_1.get_resname.return_value = "VAL"
         mock_res_1.__contains__.return_value = True
         mock_res_1.__getitem__.return_value = mock_atom_1
 
         mock_res_2 = MagicMock()
         mock_res_2.id = (" ", 2, " ")
+        mock_res_2.get_resname.return_value = "MET"
         mock_res_2.__contains__.return_value = True
         mock_res_2.__getitem__.return_value = mock_disordered_atom
 
@@ -536,7 +538,7 @@ class TestStructureParser:
         mock_structure.__getitem__.return_value = mock_model
 
         expected_coords = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
-        expected_aa_residues = ["VAL", "MET"]
+        expected_aa_residues = [("1", "VAL"), ("2", "MET")]
         expected_b_factors = np.array([15.5, 22.1], dtype=np.float32)
         expected_occupancies = np.array([1.0, 0.50], dtype=np.float32)
 
@@ -602,6 +604,7 @@ class TestStructureParser:
             "_atom_site.Cartn_y": ["20.0", "21.0", "22.0", "30.0"],
             "_atom_site.Cartn_z": ["30.0", "31.0", "32.0", "40.0"],
             "_atom_site.auth_comp_id": ["SER", "PRO", "ALA", "HIS"],
+            "_atom_site.auth_seq_id": ["1", "1", "2", "1"],
             "_atom_site.B_iso_or_equiv": ["15.5", "18.2", "16.0", "22.1"],
             "_atom_site.occupancy": ["1.0", "1.0", "0.85", "1.0"],
         }
@@ -609,7 +612,7 @@ class TestStructureParser:
         expected_coords = np.array(
             [[10.0, 20.0, 30.0], [12.0, 22.0, 32.0]], dtype=np.float32
         )
-        expected_aa_residues = ["SER", "ALA"]
+        expected_aa_residues = [("1", "SER"), ("2", "ALA")]
         expected_b_factors = np.array([15.5, 16.0], dtype=np.float32)
         expected_occupancies = np.array([1.0, 0.85], dtype=np.float32)
 
