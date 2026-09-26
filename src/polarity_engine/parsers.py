@@ -8,11 +8,18 @@ import numpy as np
 import sys
 import torch
 
-from Bio.PDB import MMCIFParser, PDBParser
+from Bio.PDB import PDBParser
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 from Bio.PDB.Structure import Structure
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
+
+from polarity_engine.constants import (
+    DEFAULT_MAX_ASA,
+    DEFAULT_VDW_RADIUS,
+    ELEMENT_RADII,
+    MAX_SASA_TIEN,
+)
 
 # Configure log
 logger = logging.getLogger(__name__)
@@ -154,7 +161,13 @@ class StructureParser:
             logger.error(msg)
             raise FileNotFoundError(msg)
 
-        return file_path.suffix.lower()
+        file_ext = file_path.suffix.lower()
+        if file_ext not in [".pdb", ".cif", ".mmcif"]:
+            msg = f"Unsupported file format found: '{file_ext}'"
+            logger.error(msg)
+            raise ValueError(msg)
+
+        return file_ext
 
     @classmethod
     def _load_and_inspect(cls, file_path: Path, file_ext: str) -> tuple[list[str], any]:
@@ -187,9 +200,16 @@ class StructureParser:
         elif file_ext in (".cif", ".mmcif"):
             try:
                 mmcif_dict = MMCIF2Dict(str(file_path))
-                key = "_atom_site.auth_asym_id"
-                if key not in mmcif_dict:
-                    raise ValueError(f"Missing essential key '{key}'")
+                key = None
+                if "_atom_site.auth_asym_id" in mmcif_dict:
+                    key = "_atom_site.auth_asym_id"
+                elif "_atom_site.label_asym_id" in mmcif_dict:
+                    key = "_atom_site.label_asym_id"
+                else:
+                    raise ValueError(
+                        "Missing essential chain identifier: neither '_atom_site.auth_asym_id' "
+                        "nor '_atom_site.label_asym_id' found in mmCIF dictionary."
+                    )
 
                 seen = set()
                 chains = [c for c in mmcif_dict[key] if not (c in seen or seen.add(c))]
@@ -200,82 +220,136 @@ class StructureParser:
         return [], None
 
     @classmethod
-    def get_alpha_carbon_coordinates(
-        cls, file_path: str | Path, chain_id: str | None = None
-    ) -> dict[str, np.ndarray]:
+    def get_all_atom_coordinates(
+        cls, file_path: str | Path, chain_ids: list[str] | None = None
+    ) -> dict[str, dict[str, Any]]:
         """
-        Main entry point to extract CA coordinates from either PDB or mmCIF files.
+        Main entry point to extract C-alpha backbone and heavy-atom.
+
+        coordinates per chain.
 
         Args:
-            file_path (str | Path): File path to the desired structure file.
-            chain_id (str): name used for the distinct, covalently linked macromolecule in the structure file.
+            file_path: File path to the target structure file.
+            chain_ids: List of chain identifiers to parse. If None, parses all
+              available chains.
+
         Returns:
-            results (dict[str, np.ndarray]): dict with chain_id as the key and loaded data as value
+            dict[str, dict[str, Any]]: Dictionary mapping chain_id to its
+            parsed coordinate dictionaries.
         """
         file_ext = cls._validate_structure_file(file_path)
         path_obj = Path(file_path)
 
-        # Inspect returns the chains AND the already-loaded data structure
         available_chains, loaded_data = cls._load_and_inspect(path_obj, file_ext)
         if not available_chains:
             raise ValueError(f"No chains found in structural file '{path_obj.name}'")
 
+        # Early filtering boundary check
+        target_chains = (
+            available_chains
+            if chain_ids is None
+            else [c for c in chain_ids if c in available_chains]
+        )
+
+        if chain_ids is not None and not target_chains:
+            raise ValueError(
+                f"None of requested chain_ids {chain_ids} were found in"
+                f" '{path_obj.name}'. Available chains: {available_chains}"
+            )
+
         results = {}
-        if chain_id is not None:
-            if chain_id not in available_chains:
-                raise ValueError(
-                    f"Requested chain '{chain_id}' not found in {available_chains}"
-                )
-
+        for c_id in target_chains:
             if file_ext == ".pdb":
-                results[chain_id] = cls._parse_legacy_pdb(loaded_data, chain_id)
+                results[c_id] = cls._parse_legacy_pdb(loaded_data, c_id)
             else:
-                results[chain_id] = cls._parse_mmcif_fast_path(loaded_data, chain_id)
-            return results
-
-        # Dynamic multi-chain collection using the same loaded_data
-        for c_id in available_chains:
-            try:
-                if file_ext == ".pdb":
-                    results[c_id] = cls._parse_legacy_pdb(loaded_data, c_id)
-                else:
-                    results[c_id] = cls._parse_mmcif_fast_path(loaded_data, c_id)
-            except ValueError:
-                continue
+                results[c_id] = cls._parse_mmcif_fast_path(loaded_data, c_id)
 
         return results
 
     @classmethod
-    def _parse_legacy_pdb(
-        cls, structure: Structure, chain_id: str
-    ) -> dict[str, dict[str, np.ndarray]]:
+    def _parse_legacy_pdb(cls, structure: Structure, chain_id: str) -> dict[str, Any]:
         """
-        Extracts CA coordinates, amino acid residues, B-factors, and occupancy values directly from
-        a pre-loaded Biopython Structure object.
+        Extracts all heavy atoms for FreeSASA Option A alongside C-alpha.
+
+        backbone attributes from a BioPython Structure object.
 
         Args:
-            structure (Structure): Pre-loaded Biopython Structure object.
+            structure (Structure): Pre-loaded BioPython Structure object.
             chain_id (str): Target chain identifier.
 
         Returns:
-            dict[str, dict[str, np.ndarray]]: Dictionary mapping chain_id to
-            arrays for 'coords', 'b_factors', and 'occupancies' as well as list of amino acid residues.
+            dict[str, Any]: Dict containing:
+                - 'ca_coords': (N, 3) float32 array of C-alpha coordinates.
+                - 'ca_b_factors': (N,) float32 array of C-alpha B-factors.
+                - 'ca_occupancies': (N,) float32 array of C-alpha occupancies.
+                - 'aa_residues': List of (seq_num_str, res_name) tuples for
+                C-alpha nodes.
+                - 'all_atom_coords': (M, 3) float64 array of all heavy atom
+                coordinates.
+                - 'all_atom_keys': List of (chain_id, seq_num_str) tuples of
+                length M.
+                - 'all_atom_names': List of atom names (e.g., 'CA', 'N', 'CB')
+                of length M.
+                - 'all_atom_res_names': List of 3-letter residue names of length
+                M.
         """
         model = structure[0]
+        if chain_id not in model:
+            raise ValueError(f"Chain identifier '{chain_id}' not found in structure.")
+
         chain = model[chain_id]
-        ca_coordinates, aa_residues, b_factors, occupancies = [], [], [], []
+
+        # C-alpha node buffers
+        ca_coordinates, aa_residues, ca_b_factors, ca_occupancies = (
+            [],
+            [],
+            [],
+            [],
+        )
+
+        # All heavy-atom buffers (for Option A FreeSASA)
+        all_atom_coords, all_atom_keys, all_atom_names, all_atom_res_names = (
+            [],
+            [],
+            [],
+            [],
+        )
 
         for residue in chain:
-            if residue.id[0] == " " and "CA" in residue:
-                atom = residue["CA"]
-                if atom.is_disordered():
-                    atom = atom.selected_child
+            # Skip heterogens/water (residue.id[0] != ' ')
+            if residue.id[0] != " ":
+                continue
 
-                ca_coordinates.append(atom.get_coord())
-                # Store tuple: (res_num_str, res_name)
-                aa_residues.append((str(residue.id[1]), residue.get_resname()))
-                b_factors.append(atom.get_bfactor())
-                occupancies.append(atom.get_occupancy())
+            res_num_str = str(residue.id[1])
+            res_name_str = residue.get_resname().strip()
+
+            for atom in residue:
+                clean_atom_name = atom.get_name().strip()
+
+                # Skip non-heavy atoms (Hydrogen / Deuterium)
+                if (
+                    clean_atom_name.startswith(("H", "D", "1H", "2H", "3H"))
+                    or atom.element == "H"
+                ):
+                    continue
+
+                # Resolve disordered point mutations / alternate conformations
+                target_atom = atom.selected_child if atom.is_disordered() else atom
+
+                coord = target_atom.get_coord()
+
+                # 1. Accumulate all heavy atoms
+                all_atom_coords.append(coord)
+                all_atom_keys.append((chain_id, res_num_str))
+                all_atom_names.append(clean_atom_name)
+                all_atom_res_names.append(res_name_str)
+
+                # 2. Extract C-alpha backbone nodes
+                if clean_atom_name == "CA":
+                    ca_coordinates.append(coord)
+                    aa_residues.append((res_num_str, res_name_str))
+                    ca_b_factors.append(float(target_atom.get_bfactor()))
+                    ca_occupancies.append(float(target_atom.get_occupancy()))
 
         if not ca_coordinates:
             raise ValueError(
@@ -283,26 +357,46 @@ class StructureParser:
             )
 
         return {
-            "coords": np.array(ca_coordinates, dtype=np.float32),
+            # Downstream C-alpha node arrays
+            "ca_coords": np.array(ca_coordinates, dtype=np.float32),
             "aa_residues": aa_residues,
-            "b_factors": np.array(b_factors, dtype=np.float32),
-            "occupancies": np.array(occupancies, dtype=np.float32),
+            "ca_b_factors": np.array(ca_b_factors, dtype=np.float32),
+            "ca_occupancies": np.array(ca_occupancies, dtype=np.float32),
+            # All heavy-atom arrays for FreeSASA
+            "all_atom_coords": np.array(all_atom_coords, dtype=np.float64),
+            "all_atom_keys": all_atom_keys,
+            "all_atom_names": all_atom_names,
+            "all_atom_res_names": all_atom_res_names,
         }
 
     @classmethod
-    def _parse_mmcif_fast_path(
-        cls, mmcif_dict: dict, chain_id: str
-    ) -> dict[str, dict[str, np.ndarray]]:
+    def _parse_mmcif_fast_path(cls, mmcif_dict: dict, chain_id: str) -> dict[str, Any]:
         """
-        Parses mmCIF coordinates from a pre-loaded MMCIF2Dict by extracting
-        Alpha Carbon (CA) positions directly from the internal arrays.
+        Parses mmCIF coordinates from a pre-loaded MMCIF2Dict.
+
+        Extracts all heavy atoms for all-atom SASA calculations alongside
+        C-alpha backbone node attributes.
 
         Args:
             mmcif_dict (dict): MMCIF2Dict object for the target project.
-            chain_id (str): Name used for the distinct, covalently linked macromolecule in the structure file.
+            chain_id (str): Name used for the distinct macromolecule in the
+              structure file.
+
         Returns:
-            chain_data (dict[str, np.ndarray]): dict with chain_id as the key and CA coordinates,
-            amino acid residues, B-factor, and Occupancy in the specified chain.
+            dict[str, Any]: Dict containing:
+                - 'ca_coords': (N, 3) float32 array of C-alpha coordinates.
+                - 'ca_b_factors': (N,) float32 array of C-alpha B-factors.
+                - 'ca_occupancies': (N,) float32 array of C-alpha occupancies.
+                - 'aa_residues': List of (seq_num_str, res_name) tuples for
+                C-alpha nodes.
+                - 'all_atom_coords': (M, 3) float64 array of all heavy atom
+                coordinates.
+                - 'all_atom_keys': List of (chain_id, seq_num_str) tuples of
+                length M.
+                - 'all_atom_names': List of atom names (e.g., 'CA', 'N', 'CB')
+                of length M.
+                - 'all_atom_res_names': List of 3-letter residue names of length
+                M.
         """
         # Prefer author sequence numbers (auth_seq_id); fallback to label_seq_id if needed
         seq_key = (
@@ -319,14 +413,16 @@ class StructureParser:
             "_atom_site.Cartn_y",
             "_atom_site.Cartn_z",
             "_atom_site.auth_comp_id",
-            seq_key,  # <--- Extract residue sequence numbers!
+            seq_key,
             "_atom_site.B_iso_or_equiv",
             "_atom_site.occupancy",
         ]
 
         for key in required_keys:
             if key not in mmcif_dict:
-                msg = f"Malformed mmCIF structure: Missing required data field '{key}'"
+                msg = (
+                    "Malformed mmCIF structure: Missing required data field" f" '{key}'"
+                )
                 logger.error(msg)
                 raise ValueError(msg)
 
@@ -336,7 +432,21 @@ class StructureParser:
             for k in required_keys
         }
 
-        ca_coordinates, aa_residues, b_factors, occupancies = [], [], [], []
+        # C-alpha node buffers
+        ca_coordinates, aa_residues, ca_b_factors, ca_occupancies = (
+            [],
+            [],
+            [],
+            [],
+        )
+
+        # All heavy-atom buffers (for Option A FreeSASA)
+        all_atom_coords, all_atom_keys, all_atom_names, all_atom_res_names = (
+            [],
+            [],
+            [],
+            [],
+        )
 
         # Parallel iteration over coordinate columns
         for group, chain, atom_name, x, y, z, aa, seq_num, b_val, occ_val in zip(
@@ -351,17 +461,39 @@ class StructureParser:
             cols["_atom_site.B_iso_or_equiv"],
             cols["_atom_site.occupancy"],
         ):
-            if group == "ATOM" and chain == chain_id and atom_name == "CA":
+            # Parse standard polymer ATOM entries matching chain_id
+            if group == "ATOM" and chain == chain_id:
+                clean_atom_name = str(atom_name).strip()
+
+                # Skip non-heavy atoms (Hydrogen / Deuterium)
+                if clean_atom_name.startswith(("H", "D", "1H", "2H", "3H")):
+                    continue
+
                 try:
-                    ca_coordinates.append([float(x), float(y), float(z)])
-                    # Store tuple: (res_num_str, res_name) e.g., ("248", "ILE")
-                    aa_residues.append((str(seq_num), str(aa)))
-                    b_factors.append(float(b_val))
-                    occupancies.append(float(occ_val))
+                    coord = [float(x), float(y), float(z)]
+                    res_num_str = str(seq_num)
+                    res_name_str = str(aa)
+
+                    # 1. Accumulate all heavy atoms
+                    all_atom_coords.append(coord)
+                    all_atom_keys.append((chain_id, res_num_str))
+                    all_atom_names.append(clean_atom_name)
+                    all_atom_res_names.append(res_name_str)
+
+                    # 2. Extract C-alpha backbone nodes
+                    if clean_atom_name == "CA":
+                        ca_coordinates.append(coord)
+                        aa_residues.append((res_num_str, res_name_str))
+                        ca_b_factors.append(float(b_val))
+                        ca_occupancies.append(float(occ_val))
+
                 except ValueError as e:
-                    msg = f"Non-numeric spatial coordinates encountered in mmCIF dictionary: {e}"
+                    msg = (
+                        "Non-numeric spatial coordinates encountered in mmCIF"
+                        f" dictionary: {e}"
+                    )
                     logger.error(msg)
-                    raise ValueError(msg)
+                    raise ValueError(msg) from e
 
         if not ca_coordinates:
             raise ValueError(
@@ -369,103 +501,185 @@ class StructureParser:
             )
 
         return {
-            "coords": np.array(ca_coordinates, dtype=np.float32),
+            # Downstream C-alpha node arrays
+            "ca_coords": np.array(ca_coordinates, dtype=np.float32),
             "aa_residues": aa_residues,
-            "b_factors": np.array(b_factors, dtype=np.float32),
-            "occupancies": np.array(occupancies, dtype=np.float32),
+            "ca_b_factors": np.array(ca_b_factors, dtype=np.float32),
+            "ca_occupancies": np.array(ca_occupancies, dtype=np.float32),
+            # All heavy-atom arrays for FreeSASA
+            "all_atom_coords": np.array(all_atom_coords, dtype=np.float64),
+            "all_atom_keys": all_atom_keys,
+            "all_atom_names": all_atom_names,
+            "all_atom_res_names": all_atom_res_names,
         }
 
-    @staticmethod
-    def get_freesasa_result(file_path: Path) -> tuple[freesasa.Result, Any]:
-        file_path = Path(file_path)
-        file_ext = file_path.suffix.lower()
-
-        try:
-            if file_ext in (".cif", ".mmcif"):
-                parser = MMCIFParser(QUIET=True)
-                bio_structure = parser.get_structure(file_path.stem, str(file_path))
-            elif file_ext == ".pdb":
-                parser = PDBParser(QUIET=True)
-                bio_structure = parser.get_structure(file_path.stem, str(file_path))
-            else:
-                raise ValueError(
-                    f"Unsupported extension '{file_ext}' for FreeSASA parsing."
-                )
-        except Exception as e:
-            raise ValueError(
-                f"Failed to parse structure file '{file_path.name}': {e}"
-            ) from e
-
-        try:
-            # Convert BioPython Structure -> freesasa.Structure
-            fs_structure = freesasa.structureFromBioPDB(bio_structure)
-            result = freesasa.calc(fs_structure)
-            return result, fs_structure
-        except Exception as e:
-            raise ValueError(
-                f"FreeSASA calculation failed for '{file_path.name}': {e}"
-            ) from e
-
-    @staticmethod
-    def extract_per_residue_sasa(
-        result: freesasa.Result, fs_structure: freesasa.Structure
-    ) -> dict[tuple[str, str], float]:
+    @classmethod
+    def _assign_vdw_radii(
+        cls, atom_names: list[str], res_names: list[str]
+    ) -> list[float]:
         """
-        Aggregates atomic SASA values per residue across the complex.
+        Assigns atomic Van der Waals radii (Å) based on heavy-atom element types.
+
+        Maps extracted atom names and residue types to empirical physical radii
+        defined in `constants.ELEMENT_RADII`. Handles structural metal species
+        (e.g., Fe, Zn, Mg) and defaults to `constants.DEFAULT_VDW_RADIUS` for
+        unmapped heavy elements.
 
         Args:
-            result (freesasa.Result): FreeSASA computation result.
-            fs_structure (freesasa.Structure): FreeSASA structure instance.
+            atom_names (list[str]): List of length M containing atom identifiers
+                (e.g., 'CA', 'N', 'CB', 'FE').
+            res_names (list[str]): List of length M containing 3-letter residue
+                names (e.g., 'ALA', 'TRP', 'HEM').
+
+        Returns:
+            list[float]: List of length M containing atomic Van der Waals
+                radii in Angstroms (Å) for FreeSASA Option A calculations.
+        """
+        radii = []
+        for atom_name, res_name in zip(atom_names, res_names):
+            clean_atom = atom_name.upper().strip()
+            # Extract lead element symbol (e.g., "CA" in protein backbone -> Carbon)
+            if clean_atom.startswith("FE"):
+                elem = "FE"
+            elif clean_atom.startswith("ZN"):
+                elem = "ZN"
+            elif clean_atom.startswith("MG"):
+                elem = "MG"
+            else:
+                elem = clean_atom[0]
+
+            radii.append(ELEMENT_RADII.get(elem, DEFAULT_VDW_RADIUS))
+        return radii
+
+    @classmethod
+    def compute_allatom_sasa_dict(
+        cls, parsed_data: dict[str, Any]
+    ) -> dict[tuple[str, str], float]:
+        """
+        Computes All-Atom SASA in-memory using freesasa.calcCoord and aggregates
+        atomic surface area values per residue.
+
+        Args:
+            parsed_data (dict[str, Any]): Dictionary returned by _parse_mmcif_fast_path or _parse_legacy_pdb.
 
         Returns:
             dict[tuple[str, str], float]: Mapping of (chain_id, res_number_str) -> raw SASA (Å²).
         """
-        residue_sasa_map = {}
-        n_atoms = fs_structure.nAtoms()
+        all_atom_coords: np.ndarray = parsed_data["all_atom_coords"]  # (M, 3) float64
+        # M tuples of (chain_id, res_num)
+        all_atom_keys: list[tuple[str, str]] = parsed_data["all_atom_keys"]
+        all_atom_names: list[str] = parsed_data["all_atom_names"]
+        all_atom_res_names: list[str] = parsed_data["all_atom_res_names"]
 
-        for i in range(n_atoms):
-            chain_id = fs_structure.chainLabel(i)
-            res_num = fs_structure.residueNumber(i).strip()
+        if all_atom_coords.size == 0:
+            raise ValueError("Empty coordinate array passed to FreeSASA calculation.")
+
+        # 1. Assign atomic VdW radii
+        radii = cls._assign_vdw_radii(all_atom_names, all_atom_res_names)
+
+        # 2. Flatten coordinates in C-contiguous row-major order: [x0, y0, z0, x1, y1, z1, ...]
+        flat_coords = all_atom_coords.flatten().tolist()
+
+        # 3. Fast C-binding execution via calcCoord
+        try:
+            result = freesasa.calcCoord(flat_coords, radii)
+        except Exception as e:
+            raise ValueError(
+                f"freesasa.calcCoord failed during C execution: {e}"
+            ) from e
+
+        # 4. Aggregate atomic SASA per residue key (chain_id, res_num_str)
+        residue_sasa_map: dict[tuple[str, str], float] = {}
+        for i in range(result.nAtoms()):
+            key = all_atom_keys[i]
             atom_area = result.atomArea(i)
-
-            key = (chain_id, res_num)
             residue_sasa_map[key] = residue_sasa_map.get(key, 0.0) + atom_area
 
         return residue_sasa_map
 
     @classmethod
-    def parse(
-        cls, file_path: str | Path, chain_ids: list[str] | None = None
-    ) -> dict[str, Any]:
+    def extract_node_rsasa_vector(
+        cls,
+        parsed_data: dict[str, Any],
+    ) -> np.ndarray:
         """
-        Parses coordinates, node metadata, B-factors, occupancies, and biophysical
-        surface accessibility (SASA) for a multi-chain complex in a single pipeline execution.
+        Computes per-residue normalized rSASA values (rSASA in [0, 1]) aligned exactly
+        with the downstream C-alpha node order ('ca_coords').
 
         Args:
-            file_path: Path to .pdb or .cif/.mmcif structure file.
-            chain_ids: Optional list of target chain IDs to isolate. If None,
-              parses all available chains.
+            parsed_data (dict[str, Any]): Output dictionary from parsing methods.
 
         Returns:
-            dict containing:
-                - 'aa_list': list[str] of 3-letter residue codes (length N)
-                - 'coords': np.ndarray of shape (N, 3) float32
-                - 'b_factors': np.ndarray of shape (N,) float32
-                - 'occupancies': np.ndarray of shape (N,) float32
-                - 'nodes': list[tuple[str, str, str]] of (chain_id, res_num_str, res_name)
-                - 'sasa_map': dict[tuple[str, str], float] mapping (chain_id, res_num) -> Å²
+            np.ndarray: (N,) float32 array of relative SASA values aligned with C-alpha nodes.
         """
-        path_obj = Path(file_path)
+        # 1. Compute raw All-Atom per-residue SASA mapping
+        raw_sasa_map = cls.compute_allatom_sasa_dict(parsed_data)
 
-        # Extract raw coordinates across specified or all chains
-        chain_coords = cls.get_alpha_carbon_coordinates(path_obj)
+        # 2. Extract C-alpha backbone node keys & residue names
+        # List of (res_num_str, res_name)
+        aa_residues: list[tuple[str, str]] = parsed_data["aa_residues"]
 
-        if chain_ids is not None:
-            chain_coords = {
-                c: data for c, data in chain_coords.items() if c in chain_ids
-            }
+        # Pull chain_id from first all_atom_key entry
+        chain_id = parsed_data["all_atom_keys"][0][0]
 
-        # Flatten per-chain arrays into unified complex-level N-length lists
+        rsasa_list = []
+        for res_num_str, res_name in aa_residues:
+            key = (chain_id, res_num_str)
+            raw_sasa = raw_sasa_map.get(key, 0.0)
+
+            # MaxASA normalization (Tien et al., 2013)
+            # Default fallback 200 Å²
+            max_sasa = MAX_SASA_TIEN.get(res_name.upper(), DEFAULT_MAX_ASA)
+            normalized_rsasa = min(
+                max(raw_sasa / max_sasa, 0.0), 1.0
+            )  # Clamp to [0, 1]
+
+            rsasa_list.append(normalized_rsasa)
+
+        return np.array(rsasa_list, dtype=np.float32)
+
+    @staticmethod
+    def _aggregate_chains(
+        chain_parsed_data: dict[str, dict[str, Any]],
+    ) -> tuple[dict[str, list], dict[str, Any]]:
+        """
+        Aggregates multi-chain structural dictionaries into unified complex-level buffers.
+
+        Iterates through per-chain payloads from get_all_atom_coordinates and concatenates them
+        across selected chains. Produces unified feature structures for backbone C-alpha nodes (N residues)
+        and all-atom heavy coordinates (M heavy atoms, where M >> N).
+
+        Residue identifiers are standardized into `(chain_id, res_num, res_name)` node tuples
+        to maintain global residue tracking during downstream graph assembly and FreeSASA lookup.
+
+        Args:
+            chain_parsed_data: Dictionary mapping chain identifiers (e.g., "A", "B") to
+                their respective parsed feature dictionaries containing C-alpha node vectors
+                (`ca_coords`, `aa_residues`, `ca_b_factors`, `ca_occupancies`) and heavy-atom
+                arrays (`all_atom_coords`, `all_atom_keys`, `all_atom_names`, `all_atom_res_names`).
+
+        Returns:
+            A tuple `(nodes_data, heavy_data)` containing concatenated complex-wide structures:
+                - `nodes_data` (dict[str, list]): C-alpha node buffers of length N:
+                    - "aa_list" (list[str]): 3-letter residue names.
+                    - "coords" (list[np.ndarray]): 3D C-alpha coordinate vectors.
+                    - "b_factors" (list[float]): C-alpha temperature factors.
+                    - "occupancies" (list[float]): C-alpha atom occupancies.
+                    - "nodes" (list[tuple[str, str, str]]): Standardized node descriptors
+                      `(chain_id, res_num, res_name)`.
+                - `heavy_data` (dict[str, Any]): Complex-wide heavy-atom payload for FreeSASA:
+                    - "all_atom_coords" (np.ndarray): Shape (M, 3) float64 matrix of all heavy-atom
+                      Cartesian coordinates across all aggregated chains.
+                    - "all_atom_keys" (list[tuple[str, str]]): Length M list of `(chain_id, res_num)`
+                      tuples for atomic-to-residue SASA aggregation.
+                    - "all_atom_names" (list[str]): Length M list of cleaned atom identifiers
+                      (e.g., "CA", "N", "CB").
+                    - "all_atom_res_names" (list[str]): Length M list of 3-letter residue names.
+
+        Raises:
+            ValueError: If `chain_parsed_data` is empty or if any constituent heavy-atom array
+                fails numpy stacking due to dimension mismatch.
+        """
         all_aa, all_coords, all_b_factors, all_occupancies, all_nodes = (
             [],
             [],
@@ -473,25 +687,28 @@ class StructureParser:
             [],
             [],
         )
+        all_heavy_coords, all_heavy_keys, all_heavy_names, all_heavy_res_names = (
+            [],
+            [],
+            [],
+            [],
+        )
 
-        for c_id, chain_data in chain_coords.items():
-            coords_arr = chain_data["coords"]
+        for c_id, chain_data in chain_parsed_data.items():
+            # Extract C-alpha backbone node attributes
+            coords_arr = chain_data["ca_coords"]
             residues = chain_data["aa_residues"]
-            b_factors = chain_data["b_factors"]
-            occupancies = chain_data["occupancies"]
+            b_factors = chain_data["ca_b_factors"]
+            occupancies = chain_data["ca_occupancies"]
 
             for i in range(len(coords_arr)):
                 res_item = residues[i]
-
-                # 1. Handle BioPython Residue object
                 if hasattr(res_item, "get_resname"):
-                    res_name = res_item.get_resname()
+                    res_name = res_item.get_resname().strip()
                     res_num = str(res_item.id[1])
-                # 2. Handle Tuple returned by fast mmCIF/PDB parsers: (res_num_str, res_name)
                 elif isinstance(res_item, (tuple, list)):
                     res_num = str(res_item[0])
                     res_name = str(res_item[1])
-                # 3. Fallback for raw string names
                 else:
                     res_name = str(res_item)
                     res_num = str(i + 1)
@@ -502,48 +719,172 @@ class StructureParser:
                 all_occupancies.append(occupancies[i])
                 all_nodes.append((c_id, res_num, res_name))
 
-        # Compute SASA map across the entire complex
-        fs_result, fs_struct = cls.get_freesasa_result(path_obj)
-        sasa_map = cls.extract_per_residue_sasa(fs_result, fs_struct)
+            # Extract heavy atoms for FreeSASA
+            all_heavy_coords.append(chain_data["all_atom_coords"])
+            all_heavy_keys.extend(chain_data["all_atom_keys"])
+            all_heavy_names.extend(chain_data["all_atom_names"])
+            all_heavy_res_names.extend(chain_data["all_atom_res_names"])
 
-        # Assemble schema output payload
-        parsed_output = {
+        nodes_data = {
             "aa_list": all_aa,
-            "coords": np.array(all_coords, dtype=np.float32),
-            "b_factors": np.array(all_b_factors, dtype=np.float32),
-            "occupancies": np.array(all_occupancies, dtype=np.float32),
+            "coords": all_coords,
+            "b_factors": all_b_factors,
+            "occupancies": all_occupancies,
             "nodes": all_nodes,
-            "sasa_map": sasa_map,
+        }
+        heavy_data = {
+            "all_atom_coords": np.vstack(all_heavy_coords),
+            "all_atom_keys": all_heavy_keys,
+            "all_atom_names": all_heavy_names,
+            "all_atom_res_names": all_heavy_res_names,
         }
 
-        # Ensure non-empty schema contracts
-        if (
-            not parsed_output["aa_list"]
-            or parsed_output["coords"].size == 0
-            or parsed_output["b_factors"].size == 0
-            or parsed_output["occupancies"].size == 0
-            or not parsed_output["nodes"]
-            or not parsed_output["sasa_map"]
-        ):
-            raise ValueError(
-                f"Failed to parse valid residue, coordinate, or SASA data from '{path_obj.name}'."
-            )
+        return nodes_data, heavy_data
 
+    @staticmethod
+    def _compute_rsasa_vector(
+        nodes: list[tuple[str, str, str]], sasa_map: dict[tuple[str, str], float]
+    ) -> np.ndarray:
+        """Computes a normalized rSASA vector (N,) aligned with C-alpha nodes."""
+        rsasa_list = []
+        for c_id, res_num, res_name in nodes:
+            key = (c_id, res_num)
+            raw_sasa = sasa_map.get(key, 0.0)
+            max_sasa = MAX_SASA_TIEN.get(res_name.upper(), DEFAULT_MAX_ASA)
+            normalized_rsasa = min(max(raw_sasa / max_sasa, 0.0), 1.0)
+            rsasa_list.append(normalized_rsasa)
+
+        return np.array(rsasa_list, dtype=np.float32)
+
+    @staticmethod
+    def _validate_parsed_output(parsed_output: dict[str, Any], filename: str) -> None:
+        """Validates that output feature vectors satisfy strict N == N element alignment contracts.
+
+        Executes defensive assertions across all 1D C-alpha node-level feature arrays and
+        metadata lists to guarantee strict index parity before returning data to the caller.
+        This prevents silent dimension mismatches from propagating downstream into PyTorch
+        Geometric tensor construction or graph edge-index builders.
+
+        Contract Invariants Enforced:
+            - len(coords) == N
+            - len(nodes) == N
+            - len(b_factors) == N
+            - len(occupancies) == N
+            - len(rsasa) == N
+            where N = len(aa_list) represents the total number of target C-alpha
+            residues in the aggregated structure.
+
+        Args:
+            parsed_output: The final dictionary assembled by `parse` containing coordinates,
+                node tuples, residue sequence names, B-factors, occupancies, and rSASA vectors.
+            filename: Name or string path of the source structure file, used for diagnostic
+                formatting in error reporting.
+
+        Raises:
+            ValueError: If any constituent vector length deviates from N, detailing
+                the exact dimension breakdown per array in the exception message.
+        """
         n_nodes = len(parsed_output["aa_list"])
         if not (
             len(parsed_output["coords"])
             == len(parsed_output["nodes"])
             == len(parsed_output["b_factors"])
             == len(parsed_output["occupancies"])
+            == len(parsed_output["rsasa"])
             == n_nodes
         ):
             raise ValueError(
-                f"Internal length mismatch in parsed output for '{path_obj.name}': "
+                f"Internal length mismatch in parsed output for '{filename}': "
                 f"got {n_nodes} residues, "
                 f"{len(parsed_output['coords'])} coordinates, "
                 f"{len(parsed_output['b_factors'])} b_factors, "
-                f"{len(parsed_output['occupancies'])} occupancies, and "
+                f"{len(parsed_output['occupancies'])} occupancies, "
+                f"{len(parsed_output['rsasa'])} rSASA values, and "
                 f"{len(parsed_output['nodes'])} node metadata items."
             )
 
+    @classmethod
+    def parse(
+        cls, file_path: str | Path, chain_ids: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Parses macromolecular structural files into unified node feature arrays
+
+        and complex-wide biophysical metrics in a single in-memory pass.
+
+        This method serves as the main pipeline orchestrator for converting raw
+        structural data (.cif, .mmcif, or .pdb) into standardized, aligned feature
+        tensors suitable for downstream PyTorch Geometric graph construction.
+
+        Execution Flow:
+            1. **Target Ingestion & Filtering:** Delegate to `get_all_atom_coordinates`
+               to parse backbone C-alpha nodes and all non-hydrogen heavy atoms
+               from disk. Unselected chains are filtered out at the ingestion boundary.
+            2. **Complex Aggregation:** Concatenate per-chain node data (length N)
+               and heavy-atom coordinate matrices (length M, where M >> N) into
+               unified complex-wide buffers via `_aggregate_chains`.
+            3. **Zero-I/O FreeSASA Calculation:** Pass the merged heavy-atom matrix
+               directly to `freesasa.calcCoord` via `compute_allatom_sasa_dict`.
+               This avoids intermediate PDB disk writes while preserving multi-chain
+               inter-chain surface occlusion.
+            4. **Vectorized rSASA Normalization:** Map atomic solvent accessibility
+               back to individual C-alpha residues and normalize against empirical
+               maximum theoretical ASA values (Tien et al., 2013).
+            5. **Contract Validation:** Execute explicit length verification across all
+               1D output feature vectors to guarantee exact N == N element alignment.
+
+        Args:
+            file_path: Absolute or relative path to the structural file (.cif,
+                .mmcif, or .pdb).
+            chain_ids: Optional list of specific chain identifiers to retain
+                (e.g., ["A", "B"]). If None, all chains present in the file are
+                parsed and concatenated into a single complex graph.
+
+        Returns:
+            A dictionary containing aligned residue-level tensors and structural metadata:
+                - "aa_list" (list[str]): Length N list of 3-letter amino acid names
+                  (e.g., ["ALA", "GLY", ...]).
+                - "coords" (np.ndarray): Shape (N, 3), float32 C-alpha Cartesian
+                  coordinates in Angstroms (A).
+                - "b_factors" (np.ndarray): Shape (N,), float32 temperature factors.
+                - "occupancies" (np.ndarray): Shape (N,), float32 atom occupancies.
+                - "nodes" (list[tuple[str, str, str]]): Length N list of residue descriptors
+                  formatted as `(chain_id, res_num, res_name)`.
+                - "sasa_map" (dict[tuple[str, str], float]): Keyed by `(chain_id, res_num)`,
+                  mapping to raw absolute Solvent Accessible Surface Area (A^2).
+                - "rsasa" (np.ndarray): Shape (N,), float32 relative SASA values normalized
+                  to [0.0, 1.0]. Non-standard amino acids default to a median ASA
+                  normalization factor (197.0 A^2).
+
+        Raises:
+            ValueError: If `file_path` contains no valid chains, if none of the requested
+                `chain_ids` are found in the target file, or if internal vector lengths
+                fail the strict N == N alignment contract check prior to returning.
+            FileNotFoundError: If `file_path` does not exist on disk.
+            RuntimeError: If FreeSASA fails to allocate memory or calculation fails.
+        """
+        path_obj = Path(file_path)
+        chain_parsed_data = cls.get_all_atom_coordinates(path_obj, chain_ids=chain_ids)
+
+        # 1. Aggregate per-chain data into complex-wide buffers
+        nodes_data, heavy_data = cls._aggregate_chains(chain_parsed_data)
+
+        # 2. Compute raw FreeSASA mapping across all heavy atoms
+        sasa_map = cls.compute_allatom_sasa_dict(heavy_data)
+
+        # 3. Compute normalized rSASA vector aligned with backbone nodes
+        rsasa_vec = cls._compute_rsasa_vector(nodes_data["nodes"], sasa_map)
+
+        # 4. Assemble output schema
+        parsed_output = {
+            "aa_list": nodes_data["aa_list"],
+            "coords": np.array(nodes_data["coords"], dtype=np.float32),
+            "b_factors": np.array(nodes_data["b_factors"], dtype=np.float32),
+            "occupancies": np.array(nodes_data["occupancies"], dtype=np.float32),
+            "nodes": nodes_data["nodes"],
+            "sasa_map": sasa_map,
+            "rsasa": rsasa_vec,
+        }
+
+        # 5. Contract validation
+        cls._validate_parsed_output(parsed_output, path_obj.name)
         return parsed_output

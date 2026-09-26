@@ -17,7 +17,7 @@ MOCK_APKC_FASTA_CONTENT = (
 )
 
 # Minimal valid PDB coordinate string for testing (Chain A, 2 residues)
-MOCK_PDB_CONTENT_1 = (
+MOCK_PDB_CONTENT = (
     "ATOM      1  N   MET A   1      24.084  14.017   4.721  1.00 20.00           N\n"
     "ATOM      2  CA  MET A   1      24.520  15.421   4.900  1.00 20.00           C\n"
     "ATOM      3  C   MET A   1      26.012  15.510   5.120  1.00 20.00           C\n"
@@ -36,6 +36,7 @@ _atom_site.type_symbol
 _atom_site.label_atom_id
 _atom_site.label_alt_id
 _atom_site.label_comp_id
+_atom_site.auth_comp_id
 _atom_site.label_asym_id
 _atom_site.auth_asym_id
 _atom_site.label_seq_id
@@ -46,10 +47,15 @@ _atom_site.Cartn_y
 _atom_site.Cartn_z
 _atom_site.occupancy
 _atom_site.B_iso_or_equiv
-ATOM 1 C CA . VAL A A 1 1 ? 12.345 23.456 34.567 1.00 15.50
-ATOM 2 C CA . MET A A 2 2 ? 13.100 24.200 35.300 1.00 15.50
-ATOM 3 C CA . ALA B B 1 1 ? 20.000 30.000 40.000 1.00 22.10
-ATOM 4 C CA . ARG B B 2 2 ? 21.000 31.000 41.000 1.00 22.10
+ATOM 1 N N . VAL VAL A A 1 1 ? 11.000 22.000 33.000 1.00 15.50
+ATOM 2 C CA . VAL VAL A A 1 1 ? 12.345 23.456 34.567 1.00 15.50
+ATOM 3 C C . VAL VAL A A 1 1 ? 13.000 24.000 35.000 1.00 15.50
+ATOM 4 N N . MET MET A A 2 2 ? 12.000 23.000 34.000 1.00 15.50
+ATOM 5 C CA . MET MET A A 2 2 ? 13.100 24.200 35.300 1.00 15.50
+ATOM 6 N N . ALA ALA B B 1 1 ? 19.000 29.000 39.000 1.00 22.10
+ATOM 7 C CA . ALA ALA B B 1 1 ? 20.000 30.000 40.000 1.00 22.10
+ATOM 8 N N . ARG ARG B B 2 2 ? 20.000 30.000 40.000 1.00 22.10
+ATOM 9 C CA . ARG ARG B B 2 2 ? 21.000 31.000 41.000 1.00 22.10
 #
 """
 
@@ -82,6 +88,7 @@ MOCK_PROTEIN_5RES = {
         ("A", "4"): 285.0,  # TRP: Fully exposed
         ("A", "5"): 98.5,  # UNK: Triggers DEFAULT_MAX_ASA fallback (197.0) -> 0.5
     },
+    "rsasa": np.array([0.5, 0.0, 0.5, 1.0, 0.5], dtype=np.float32),
     "name": "mock_5res_complex",
 }
 
@@ -92,6 +99,7 @@ MOCK_PROTEIN_SINGLE_RES = {
     "occupancies": np.array([1.0], dtype=np.float32),
     "nodes": [("A", "1", "ALA")],
     "sasa_map": {("A", "1"): 64.5},
+    "rsasa": np.array([0.5], dtype=np.float32),
     "name": "mock_single_res",
 }
 
@@ -102,6 +110,7 @@ MOCK_PROTEIN_CORRUPTED_NAN = {
     "occupancies": np.array([1.0, 1.0], dtype=np.float32),
     "nodes": [("A", "1", "ALA"), ("A", "2", "GLY")],
     "sasa_map": {("A", "1"): 64.5, ("A", "2"): 0.0},
+    "rsasa": np.array([0.5, 0.0], dtype=np.float32),
     "name": "mock_corrupted_nan",
 }
 
@@ -112,6 +121,7 @@ MOCK_PROTEIN_CORRUPTED_INF = {
     "occupancies": np.array([1.0, 1.0], dtype=np.float32),
     "nodes": [("A", "1", "ALA"), ("A", "2", "GLY")],
     "sasa_map": {("A", "1"): 64.5, ("A", "2"): 0.0},
+    "rsasa": np.array([0.5, 0.0], dtype=np.float32),
     "name": "mock_corrupted_inf",
 }
 
@@ -144,3 +154,6 @@ MOCK_B_FACTORS_NP = np.array([12.5, 18.0, 25.4, 30.1], dtype=np.float32)
 
 # Corresponding occupancies (atomic presence confidence in structure)
 MOCK_OCCUPANCIES_NP = np.array([1.0, 1.0, 0.85, 1.0], dtype=np.float32)
+
+# Pre-computed normalized relative SASA values in [0.0, 1.0]
+MOCK_RSASA_NP: np.ndarray = np.array([0.5, 0.0, 0.5, 1.0], dtype=np.float32)
