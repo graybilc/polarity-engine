@@ -103,7 +103,14 @@ class TestProteinGraphBuilder:
     """
 
     def test_tensor_shapes_and_types(self, builder, dummy_5_residue_protein):
-        """Validates node, edge, and coordinate tensor dimensions and feature locations."""
+        """
+        Arrange:
+            Extract standard 5-residue protein mock data.
+        Act:
+            Build PyTorch Geometric graph via ProteinGraphBuilder.
+        Assert:
+            Validate node, edge, coordinate, and attribute tensor shapes/dtypes.
+        """
         aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
             dummy_5_residue_protein
         )
@@ -146,7 +153,14 @@ class TestProteinGraphBuilder:
         assert data.edge_attr.dtype == torch.float32
 
     def test_no_divide_by_zero(self, builder, dummy_single_residue_protein):
-        """Verifies sequence position normalization prevents division-by-zero for single-residue inputs (N=1)."""
+        """
+        Arrange:
+            Extract single-residue synthetic protein input (N=1).
+        Act:
+            Construct graph representation.
+        Assert:
+            Verify zero-division prevention for single sequence positions and feature bounds.
+        """
         aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
             dummy_single_residue_protein
         )
@@ -181,7 +195,14 @@ class TestProteinGraphBuilder:
         ), "Single-residue rSASA must be bounded in [0.0, 1.0]"
 
     def test_corrupt_protein_nan(self, builder, corrupted_protein_nan):
-        """Verify that ValueError is raised when coordinates contain NaN values."""
+        """
+        Arrange:
+            Extract protein dataset containing NaN coordinates.
+        Act:
+            Attempt building graph structure.
+        Assert:
+            Expect ValueError due to invalid coordinate numerical safety checks.
+        """
         aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
             corrupted_protein_nan
         )
@@ -191,7 +212,14 @@ class TestProteinGraphBuilder:
             )
 
     def test_corrupt_protein_inf(self, builder, corrupted_protein_inf):
-        """Verify that ValueError is raised when coordinates contain Inf values."""
+        """
+        Arrange:
+            Extract protein dataset containing Inf coordinates.
+        Act:
+            Attempt building graph structure.
+        Assert:
+            Expect ValueError due to infinite coordinate values.
+        """
         aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
             corrupted_protein_inf
         )
@@ -201,7 +229,14 @@ class TestProteinGraphBuilder:
             )
 
     def test_corrupt_protein_nodes_mismatch(self, builder, dummy_5_residue_protein):
-        """Verify that ValueError is raised when nodes metadata length mismatches aa_list length."""
+        """
+        Arrange:
+            Extract 5-residue protein and truncate nodes metadata to length 4.
+        Act:
+            Attempt graph generation with mismatched length vectors.
+        Assert:
+            Expect ValueError flagging metadata length mismatch.
+        """
         aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
             dummy_5_residue_protein
         )
@@ -221,7 +256,14 @@ class TestProteinGraphBuilder:
             )
 
     def test_unit_vectors_normalized(self, builder, dummy_5_residue_protein):
-        """Verifies direction vectors in edge_attr[:, :3] have unit norm (~1.0)."""
+        """
+        Arrange:
+            Build graph from standard 5-residue mock dataset.
+        Act:
+            Slice unit direction vectors from edge attribute tensor.
+        Assert:
+            Validate vector norms equal 1.0 within floating point tolerance.
+        """
         aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
             dummy_5_residue_protein
         )
@@ -235,7 +277,14 @@ class TestProteinGraphBuilder:
         torch.testing.assert_close(norms, torch.ones_like(norms), rtol=1e-4, atol=1e-4)
 
     def test_sequence_position_normalization(self, builder, dummy_5_residue_protein):
-        """Verifies sequence position scalar stays strictly bounded in [0.0, 1.0]."""
+        """
+        Arrange:
+            Generate graph from 5-residue protein.
+        Act:
+            Extract relative sequence position column.
+        Assert:
+            Confirm values lie strictly within range [0.0, 1.0] from first to last residue.
+        """
         aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
             dummy_5_residue_protein
         )
@@ -249,7 +298,14 @@ class TestProteinGraphBuilder:
         assert (seq_positions >= 0.0).all() and (seq_positions <= 1.0).all()
 
     def test_graph_symmetry_and_topology(self, builder, dummy_5_residue_protein):
-        """Validates distance cutoff filtering and edge symmetry."""
+        """
+        Arrange:
+            Generate graph from 5-residue protein with an isolated node beyond distance cutoff.
+        Act:
+            Extract edge index and filter inter-node connections.
+        Assert:
+            Confirm distant node (index 4) remains unconnected.
+        """
         aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
             dummy_5_residue_protein
         )
@@ -269,7 +325,14 @@ class TestProteinGraphBuilder:
         ), "Isolated node beyond distance cutoff was incorrectly connected to another node"
 
     def test_edge_index_is_symmetric(self, builder, dummy_5_residue_protein):
-        """Verifies that for every edge (i -> j), the reverse edge (j -> i) exists."""
+        """
+        Arrange:
+            Build protein graph.
+        Act:
+            Collect unique directed edge index tuples.
+        Assert:
+            Ensure bidirectional presence of every edge pair (i -> j) and (j -> i).
+        """
         aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
             dummy_5_residue_protein
         )
@@ -284,7 +347,14 @@ class TestProteinGraphBuilder:
             assert (dst, src) in edges, f"Edge ({src} -> {dst}) lacks reverse edge!"
 
     def test_build_graph_with_mock_rsasa(self, builder):
-        """Verifies build_graph output matching using direct mock arrays."""
+        """
+        Arrange:
+            Load standard direct NumPy mock fixtures.
+        Act:
+            Build graph with direct mock array injection.
+        Assert:
+            Verify output node shapes and matching rSASA column slices.
+        """
         coords_np = np.array(MOCK_COORDS_NP, dtype=np.float32)
 
         data = builder.build_graph(
