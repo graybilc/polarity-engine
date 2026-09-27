@@ -826,20 +826,25 @@ class StructureParser:
         # 3. Symmetric Eigen-decomposition
         eigenvalues, eigenvectors = la.eigh(H)
 
-        # 4. Filter zero modes (first 6 corresponding to rigid-body translation/rotation)
-        start_mode = 6 if len(eigenvalues) > 6 else 0
-        slow_evals = eigenvalues[start_mode:]
-        slow_evecs = eigenvectors[:, start_mode:]
-
-        if len(slow_evals) == 0:
+        # 4. Filter zero modes (all eigenvalues <= 1e-5, including rigid-body & disconnected components)
+        valid_mask = eigenvalues > 1e-5
+        if not np.any(valid_mask):
             return np.zeros(N, dtype=np.float32)
 
-        # 5. Calculate Mean-Square Fluctuations (MSF)
-        msf = np.zeros(N, dtype=np.float32)
-        for i in range(N):
-            v_i = slow_evecs[3 * i : 3 * i + 3, :]  # Shape: (3, num_modes)
-            sq_disp = np.sum(v_i**2, axis=0)  # x^2 + y^2 + z^2 per mode
-            msf[i] = np.sum(sq_disp / slow_evals)
+        # Shape: (num_valid_modes,)
+        slow_evals = eigenvalues[valid_mask]
+        # Shape: (3N, num_valid_modes)
+        slow_evecs = eigenvectors[:, valid_mask]
+
+        # 5. Vectorized Mean-Square Fluctuations (MSF) computation
+        # Reshape to (N, 3, num_valid_modes)
+        evecs_3d = slow_evecs.reshape(N, 3, -1)
+
+        # Sum squared x, y, z displacement per node per valid mode: Shape (N, num_valid_modes)
+        sq_disp = np.sum(evecs_3d**2, axis=1)
+
+        # Weight by inverse non-zero eigenvalues and sum over valid modes
+        msf = np.sum(sq_disp / slow_evals, axis=1)
 
         # 6. Min-Max Normalization for Node Feature Channel [25]
         min_val, max_val = np.min(msf), np.max(msf)
@@ -887,7 +892,7 @@ class StructureParser:
             == len(parsed_output["b_factors"])
             == len(parsed_output["occupancies"])
             == len(parsed_output["rsasa"])
-            == len(parsed_output["msf"])
+            == len(parsed_output["anm_msf"])
             == n_nodes
         ):
             raise ValueError(
@@ -897,7 +902,7 @@ class StructureParser:
                 f"{len(parsed_output['b_factors'])} b_factors, "
                 f"{len(parsed_output['occupancies'])} occupancies, "
                 f"{len(parsed_output['rsasa'])} rSASA values, and "
-                f"{len(parsed_output["msf"])} Mean-Square Fluctuations and "
+                f"{len(parsed_output["anm_msf"])} Mean-Square Fluctuations and "
                 f"{len(parsed_output['nodes'])} node metadata items."
             )
 
@@ -989,7 +994,7 @@ class StructureParser:
             "nodes": nodes_data["nodes"],
             "sasa_map": sasa_map,
             "rsasa": rsasa_vec,
-            "msf": msf_features,
+            "anm_msf": msf_features,
         }
 
         # 5. Contract validation
