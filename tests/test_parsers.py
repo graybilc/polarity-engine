@@ -106,7 +106,9 @@ class TestFastaParserPublicAPI:
         fasta_content = ">header_1\nMUGNCCAGLSRRLKLPZDCMA\n"
         fasta_file_path.write_text(fasta_content, encoding="utf-8")
 
-        parsed_data = FastaParser.parse_fasta(fasta_file_path)
+        # Set caplog level explicitly before invoking logger
+        with caplog.at_level(logging.WARNING):
+            parsed_data = FastaParser.parse_fasta(fasta_file_path)
 
         warning_records = [rec for rec in caplog.records if rec.levelname == "WARNING"]
         assert parsed_data == {"header_1": "MUGNCCAGLSRRLKLPZDCMA"}
@@ -190,11 +192,11 @@ class TestStructureParserPublicAPI:
         Act:
             Invoke public entry point StructureParser.parse.
         Assert:
-            Verify compliance with 7-key schema contract, array dimensions, and float32 dtypes.
+            Verify compliance with 8-key schema contract, array dimensions, and float32 dtypes.
         """
         parsed_output = StructureParser.parse(mock_cif_file)
 
-        # Schema contract verification
+        # Schema contract verification (8 keys total)
         assert "aa_list" in parsed_output
         assert "coords" in parsed_output
         assert "b_factors" in parsed_output
@@ -202,6 +204,7 @@ class TestStructureParserPublicAPI:
         assert "nodes" in parsed_output
         assert "sasa_map" in parsed_output
         assert "rsasa" in parsed_output
+        assert "anm_msf" in parsed_output
 
         # Shape verification
         n_nodes = len(parsed_output["aa_list"])
@@ -210,12 +213,14 @@ class TestStructureParserPublicAPI:
         assert parsed_output["occupancies"].shape == (n_nodes,)
         assert len(parsed_output["nodes"]) == n_nodes
         assert parsed_output["rsasa"].shape == (n_nodes,)
+        assert parsed_output["anm_msf"].shape == (n_nodes,)
 
         # Type safety
         assert parsed_output["coords"].dtype == np.float32
         assert parsed_output["b_factors"].dtype == np.float32
         assert parsed_output["occupancies"].dtype == np.float32
         assert parsed_output["rsasa"].dtype == np.float32
+        assert parsed_output["anm_msf"].dtype == np.float32
 
     def test_parse_pdb_returns_complete_schema(self, mock_pdb_file):
         """
@@ -233,6 +238,7 @@ class TestStructureParserPublicAPI:
         assert parsed_output["coords"].shape == (n_nodes, 3)
         assert parsed_output["b_factors"].shape == (n_nodes,)
         assert parsed_output["occupancies"].shape == (n_nodes,)
+        assert parsed_output["anm_msf"].shape == (n_nodes,)
 
     def test_parse_chain_filtering_restricts_output(self, mock_cif_file):
         """
@@ -320,6 +326,47 @@ class TestStructureParserPublicAPI:
 
 class TestStructureParserInternalLogic:
     """Targeted white-box unit tests validating high-risk internal logic."""
+
+    def test_compute_anm_msf_accepts_list_and_array_inputs(self):
+        """
+        Arrange:
+            Construct synthetic C-alpha coordinates as both a list of 3D vectors
+            and a 2D NumPy array (5 residues).
+        Act:
+            Invoke classmethod StructureParser._compute_anm_msf on both input types.
+        Assert:
+            Verify both input types produce identical normalized MSF float32 outputs of shape (5,).
+        """
+        coords_list = [
+            np.array([0.0, 0.0, 0.0]),
+            np.array([3.8, 0.0, 0.0]),
+            np.array([7.6, 0.0, 0.0]),
+            np.array([11.4, 0.0, 0.0]),
+            np.array([15.2, 0.0, 0.0]),
+        ]
+        coords_arr = np.array(coords_list)
+
+        msf_from_list = StructureParser._compute_anm_msf(coords_list)
+        msf_from_arr = StructureParser._compute_anm_msf(coords_arr)
+
+        assert msf_from_list.shape == (5,)
+        assert msf_from_list.dtype == np.float32
+        assert np.allclose(msf_from_list, msf_from_arr, atol=1e-6)
+
+    def test_compute_anm_msf_short_peptide_safeguard(self):
+        """
+        Arrange:
+            Prepare coordinate arrays with fewer than 3 nodes (1 or 2 residues).
+        Act:
+            Invoke StructureParser._compute_anm_msf.
+        Assert:
+            Verify safeguard returns array of zeros without raising matrix solver exceptions.
+        """
+        short_coords = np.array([[0.0, 0.0, 0.0], [3.8, 0.0, 0.0]])
+        msf = StructureParser._compute_anm_msf(short_coords)
+
+        assert msf.shape == (2,)
+        assert np.array_equal(msf, np.zeros(2, dtype=np.float32))
 
     def test_parse_mmcif_fast_path_chain_isolation(self):
         """
