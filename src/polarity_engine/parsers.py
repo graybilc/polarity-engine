@@ -910,8 +910,8 @@ class StructureParser:
     def parse(
         cls, file_path: str | Path, chain_ids: list[str] | None = None
     ) -> dict[str, Any]:
-        """Parses macromolecular structural files into unified node feature arrays
-
+        """
+        Parses macromolecular structural files into unified node feature arrays
         and complex-wide biophysical metrics in a single in-memory pass.
 
         This method serves as the main pipeline orchestrator for converting raw
