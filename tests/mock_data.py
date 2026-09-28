@@ -89,6 +89,7 @@ MOCK_PROTEIN_5RES = {
         ("A", "5"): 98.5,  # UNK: Triggers DEFAULT_MAX_ASA fallback (197.0) -> 0.5
     },
     "rsasa": np.array([0.5, 0.0, 0.5, 1.0, 0.5], dtype=np.float32),
+    "anm_msf": np.array([0.1, 0.25, 0.5, 0.75, 1.0], dtype=np.float32),
     "name": "mock_5res_complex",
 }
 
@@ -100,6 +101,9 @@ MOCK_PROTEIN_SINGLE_RES = {
     "nodes": [("A", "1", "ALA")],
     "sasa_map": {("A", "1"): 64.5},
     "rsasa": np.array([0.5], dtype=np.float32),
+    "anm_msf": np.array(
+        [0.0], dtype=np.float32
+    ),  # Short peptide safeguard (N < 3) -> zeros
     "name": "mock_single_res",
 }
 
@@ -111,6 +115,7 @@ MOCK_PROTEIN_CORRUPTED_NAN = {
     "nodes": [("A", "1", "ALA"), ("A", "2", "GLY")],
     "sasa_map": {("A", "1"): 64.5, ("A", "2"): 0.0},
     "rsasa": np.array([0.5, 0.0], dtype=np.float32),
+    "anm_msf": np.array([0.0, 0.0], dtype=np.float32),
     "name": "mock_corrupted_nan",
 }
 
@@ -122,6 +127,7 @@ MOCK_PROTEIN_CORRUPTED_INF = {
     "nodes": [("A", "1", "ALA"), ("A", "2", "GLY")],
     "sasa_map": {("A", "1"): 64.5, ("A", "2"): 0.0},
     "rsasa": np.array([0.5, 0.0], dtype=np.float32),
+    "anm_msf": np.array([0.0, 0.0], dtype=np.float32),
     "name": "mock_corrupted_inf",
 }
 
@@ -157,3 +163,6 @@ MOCK_OCCUPANCIES_NP = np.array([1.0, 1.0, 0.85, 1.0], dtype=np.float32)
 
 # Pre-computed normalized relative SASA values in [0.0, 1.0]
 MOCK_RSASA_NP: np.ndarray = np.array([0.5, 0.0, 0.5, 1.0], dtype=np.float32)
+
+# 4-residue standard complex (normalized to [0, 1])
+MOCK_ANM_MSF_NP = np.array([0.25, 0.50, 0.75, 1.00], dtype=np.float32)

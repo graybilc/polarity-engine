@@ -13,6 +13,7 @@ from tests.mock_data import (
     MOCK_B_FACTORS_NP,
     MOCK_OCCUPANCIES_NP,
     MOCK_RSASA_NP,
+    MOCK_ANM_MSF_NP,
     MOCK_PROTEIN_5RES,
     MOCK_PROTEIN_CORRUPTED_NAN,
     MOCK_PROTEIN_SINGLE_RES,
@@ -23,6 +24,7 @@ SEQ_POS_COL = 21
 RSASA_COL = 22
 B_FACTOR_COL = 23
 OCCUPANCY_COL = 24
+ANM_MSF_COL = 25
 
 
 @pytest.fixture
@@ -45,6 +47,7 @@ def dummy_5_residue_protein():
         MOCK_PROTEIN_5RES["occupancies"],
         MOCK_PROTEIN_5RES["nodes"],
         MOCK_PROTEIN_5RES["rsasa"],
+        MOCK_PROTEIN_5RES["anm_msf"],
         MOCK_PROTEIN_5RES["name"],
     )
 
@@ -61,6 +64,7 @@ def dummy_single_residue_protein():
         MOCK_PROTEIN_SINGLE_RES["occupancies"],
         MOCK_PROTEIN_SINGLE_RES["nodes"],
         MOCK_PROTEIN_SINGLE_RES["rsasa"],
+        MOCK_PROTEIN_SINGLE_RES["anm_msf"],
         MOCK_PROTEIN_SINGLE_RES["name"],
     )
 
@@ -77,6 +81,7 @@ def corrupted_protein_nan():
         MOCK_PROTEIN_CORRUPTED_NAN["occupancies"],
         MOCK_PROTEIN_CORRUPTED_NAN["nodes"],
         MOCK_PROTEIN_CORRUPTED_NAN["rsasa"],
+        MOCK_PROTEIN_CORRUPTED_NAN["anm_msf"],
         MOCK_PROTEIN_CORRUPTED_NAN["name"],
     )
 
@@ -93,6 +98,7 @@ def corrupted_protein_inf():
         MOCK_PROTEIN_CORRUPTED_INF["occupancies"],
         MOCK_PROTEIN_CORRUPTED_INF["nodes"],
         MOCK_PROTEIN_CORRUPTED_INF["rsasa"],
+        MOCK_PROTEIN_CORRUPTED_INF["anm_msf"],
         MOCK_PROTEIN_CORRUPTED_INF["name"],
     )
 
@@ -111,7 +117,7 @@ class TestProteinGraphBuilder:
         Assert:
             Validate node, edge, coordinate, and attribute tensor shapes/dtypes.
         """
-        aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
+        aa_list, coords, b_factors, occupancies, nodes, rsasa, anm_msf, name = (
             dummy_5_residue_protein
         )
         data = builder.build_graph(
@@ -121,14 +127,15 @@ class TestProteinGraphBuilder:
             occupancies_np=occupancies,
             nodes=nodes,
             rsasa_np=rsasa,
+            anm_msf_np=anm_msf,
             name=name,
         )
 
         N = len(aa_list)
         E = data.edge_index.shape[1]
 
-        # Node Features: (N, 25) -> 21 one-hot + 1 seq_pos + 1 rSASA + 1 B-factor + 1 occupancy
-        assert data.x.shape == (N, 25)
+        # Node Features: (N, 25) -> 21 one-hot + 1 seq_pos + 1 rSASA + 1 B-factor + 1 occupancy + anm_msf
+        assert data.x.shape == (N, 26)
         assert data.x.dtype == torch.float32
 
         # Verify rSASA, B-factors, and Occupancies in node feature tensor slices
@@ -139,6 +146,7 @@ class TestProteinGraphBuilder:
         assert torch.allclose(
             data.x[:, OCCUPANCY_COL], torch.from_numpy(occupancies).float()
         )
+        assert torch.allclose(data.x[:, ANM_MSF_COL], torch.from_numpy(anm_msf).float())
 
         # Coordinates: (N, 3)
         assert data.pos.shape == (N, 3)
@@ -161,7 +169,7 @@ class TestProteinGraphBuilder:
         Assert:
             Verify zero-division prevention for single sequence positions and feature bounds.
         """
-        aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
+        aa_list, coords, b_factors, occupancies, nodes, rsasa, anm_msf, name = (
             dummy_single_residue_protein
         )
         data = builder.build_graph(
@@ -171,11 +179,12 @@ class TestProteinGraphBuilder:
             occupancies_np=occupancies,
             nodes=nodes,
             rsasa_np=rsasa,
+            anm_msf_np=anm_msf,
             name=name,
         )
 
         # 1. Verify tensor shapes
-        assert data.x.shape == (1, 25)
+        assert data.x.shape == (1, 26)
         assert data.edge_index.shape == (2, 0)
         assert data.edge_attr.shape == (0, 20)
 
@@ -203,12 +212,19 @@ class TestProteinGraphBuilder:
         Assert:
             Expect ValueError due to invalid coordinate numerical safety checks.
         """
-        aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
+        aa_list, coords, b_factors, occupancies, nodes, rsasa, anm_msf, name = (
             corrupted_protein_nan
         )
         with pytest.raises(ValueError, match="Invalid coordinates in structure"):
             builder.build_graph(
-                aa_list, coords, b_factors, occupancies, nodes, rsasa, name=name
+                aa_list=aa_list,
+                coords_np=coords,
+                b_factors_np=b_factors,
+                occupancies_np=occupancies,
+                nodes=nodes,
+                rsasa_np=rsasa,
+                anm_msf_np=anm_msf,
+                name=name,
             )
 
     def test_corrupt_protein_inf(self, builder, corrupted_protein_inf):
@@ -220,12 +236,19 @@ class TestProteinGraphBuilder:
         Assert:
             Expect ValueError due to infinite coordinate values.
         """
-        aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
+        aa_list, coords, b_factors, occupancies, nodes, rsasa, anm_msf, name = (
             corrupted_protein_inf
         )
         with pytest.raises(ValueError, match="Invalid coordinates in structure"):
             builder.build_graph(
-                aa_list, coords, b_factors, occupancies, nodes, rsasa, name=name
+                aa_list=aa_list,
+                coords_np=coords,
+                b_factors_np=b_factors,
+                occupancies_np=occupancies,
+                nodes=nodes,
+                rsasa_np=rsasa,
+                anm_msf_np=anm_msf,
+                name=name,
             )
 
     def test_corrupt_protein_nodes_mismatch(self, builder, dummy_5_residue_protein):
@@ -237,7 +260,7 @@ class TestProteinGraphBuilder:
         Assert:
             Expect ValueError flagging metadata length mismatch.
         """
-        aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
+        aa_list, coords, b_factors, occupancies, nodes, rsasa, anm_msf, name = (
             dummy_5_residue_protein
         )
 
@@ -252,6 +275,7 @@ class TestProteinGraphBuilder:
                 occupancies_np=occupancies,
                 nodes=truncated_nodes,
                 rsasa_np=rsasa,
+                anm_msf_np=anm_msf,
                 name=name,
             )
 
@@ -264,11 +288,11 @@ class TestProteinGraphBuilder:
         Assert:
             Validate vector norms equal 1.0 within floating point tolerance.
         """
-        aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
+        aa_list, coords, b_factors, occupancies, nodes, rsasa, anm_msf, name = (
             dummy_5_residue_protein
         )
         data = builder.build_graph(
-            aa_list, coords, b_factors, occupancies, nodes, rsasa, name=name
+            aa_list, coords, b_factors, occupancies, nodes, rsasa, anm_msf, name=name
         )
 
         unit_vecs = data.edge_attr[:, :3]
@@ -285,11 +309,11 @@ class TestProteinGraphBuilder:
         Assert:
             Confirm values lie strictly within range [0.0, 1.0] from first to last residue.
         """
-        aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
+        aa_list, coords, b_factors, occupancies, nodes, rsasa, anm_msf, name = (
             dummy_5_residue_protein
         )
         data = builder.build_graph(
-            aa_list, coords, b_factors, occupancies, nodes, rsasa, name=name
+            aa_list, coords, b_factors, occupancies, nodes, rsasa, anm_msf, name=name
         )
 
         seq_positions = data.x[:, SEQ_POS_COL]
@@ -306,11 +330,11 @@ class TestProteinGraphBuilder:
         Assert:
             Confirm distant node (index 4) remains unconnected.
         """
-        aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
+        aa_list, coords, b_factors, occupancies, nodes, rsasa, anm_msf, name = (
             dummy_5_residue_protein
         )
         data = builder.build_graph(
-            aa_list, coords, b_factors, occupancies, nodes, rsasa, name=name
+            aa_list, coords, b_factors, occupancies, nodes, rsasa, anm_msf, name=name
         )
 
         edge_index = data.edge_index
@@ -333,11 +357,11 @@ class TestProteinGraphBuilder:
         Assert:
             Ensure bidirectional presence of every edge pair (i -> j) and (j -> i).
         """
-        aa_list, coords, b_factors, occupancies, nodes, rsasa, name = (
+        aa_list, coords, b_factors, occupancies, nodes, rsasa, anm_msf, name = (
             dummy_5_residue_protein
         )
         data = builder.build_graph(
-            aa_list, coords, b_factors, occupancies, nodes, rsasa, name=name
+            aa_list, coords, b_factors, occupancies, nodes, rsasa, anm_msf, name=name
         )
 
         edge_index = data.edge_index
@@ -364,9 +388,89 @@ class TestProteinGraphBuilder:
             occupancies_np=MOCK_OCCUPANCIES_NP,
             nodes=MOCK_NODES,
             rsasa_np=MOCK_RSASA_NP,
+            anm_msf_np=MOCK_ANM_MSF_NP,
             name="mock_complex",
         )
 
-        assert data.x.shape == (4, 25)
+        assert data.x.shape == (4, 26)
         rsasa_column = data.x[:, RSASA_COL]
         assert torch.allclose(rsasa_column, torch.from_numpy(MOCK_RSASA_NP).float())
+
+    def test_anm_msf_default_fallback(self, builder, dummy_5_residue_protein):
+        """
+        Arrange:
+            Extract 5-residue protein mock data.
+        Act:
+            Build graph without passing anm_msf_np parameter (defaulting to None).
+        Assert:
+            Verify node features tensor shape is (N, 26) and ANM MSF channel contains zeros.
+        """
+        aa_list, coords, b_factors, occupancies, nodes, rsasa, _, name = (
+            dummy_5_residue_protein
+        )
+        data = builder.build_graph(
+            aa_list=aa_list,
+            coords_np=coords,
+            b_factors_np=b_factors,
+            occupancies_np=occupancies,
+            nodes=nodes,
+            rsasa_np=rsasa,
+            name=name,
+        )
+
+        assert data.x.shape == (len(aa_list), 26)
+        assert torch.allclose(
+            data.x[:, ANM_MSF_COL], torch.zeros(len(aa_list), dtype=torch.float32)
+        )
+
+    def test_corrupt_anm_msf_nan(self, builder, dummy_5_residue_protein):
+        """
+        Arrange:
+            Inject NaN into anm_msf array.
+        Act:
+            Attempt building graph structure.
+        Assert:
+            Expect ValueError flagging invalid ANM MSF values.
+        """
+        aa_list, coords, b_factors, occupancies, nodes, rsasa, _, name = (
+            dummy_5_residue_protein
+        )
+        corrupted_anm_msf = np.array([0.1, np.nan, 0.5, 0.7, 1.0], dtype=np.float32)
+
+        with pytest.raises(ValueError, match="Invalid ANM MSF in structure"):
+            builder.build_graph(
+                aa_list=aa_list,
+                coords_np=coords,
+                b_factors_np=b_factors,
+                occupancies_np=occupancies,
+                nodes=nodes,
+                rsasa_np=rsasa,
+                anm_msf_np=corrupted_anm_msf,
+                name=name,
+            )
+
+    def test_corrupt_anm_msf_length_mismatch(self, builder, dummy_5_residue_protein):
+        """
+        Arrange:
+            Supply an anm_msf_np array with truncated length (4 vs 5).
+        Act:
+            Attempt building graph structure.
+        Assert:
+            Expect ValueError flagging length mismatch.
+        """
+        aa_list, coords, b_factors, occupancies, nodes, rsasa, anm_msf, name = (
+            dummy_5_residue_protein
+        )
+        mismatched_anm_msf = anm_msf[:-1]  # length 4
+
+        with pytest.raises(ValueError, match="Length mismatch in structure"):
+            builder.build_graph(
+                aa_list=aa_list,
+                coords_np=coords,
+                b_factors_np=b_factors,
+                occupancies_np=occupancies,
+                nodes=nodes,
+                rsasa_np=rsasa,
+                anm_msf_np=mismatched_anm_msf,
+                name=name,
+            )

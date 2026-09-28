@@ -230,6 +230,7 @@ class ProteinGraphBuilder:
         occupancies_np: np.ndarray,
         nodes: list[tuple[str, str, str]],
         rsasa_np: np.ndarray,
+        anm_msf_np: np.ndarray | None = None,
         name: str = "",
     ) -> Data:
         """
@@ -242,11 +243,18 @@ class ProteinGraphBuilder:
             occupancies_np: NumPy array of residue occupancies of shape (N,).
             nodes: List of (chain_id, res_num_str, res_name_3let) corresponding to PyG nodes.
             rsasa_np: NumPy array of relative SASA values of shape (N,).
+            anm_msf_np: NumPy array of normalized Mean-Square Fluctuations of shape (N,).
+                If None, defaults to zeros of shape (N,).
             name: Structural identifier or complex name metadata.
 
         Returns:
-            Data: PyTorch Geometric Data instance with x (N, 25), edge_index, edge_attr, pos, and name.
+            Data: PyTorch Geometric Data instance with x (N, 26), edge_index, edge_attr, pos, and name.
         """
+        num_nodes = len(aa_list)
+
+        if anm_msf_np is None:
+            anm_msf_np = np.zeros(num_nodes, dtype=np.float32)
+
         # 1. Input Sanitization Guardrails
         if not np.isfinite(coords_np).all():
             raise ValueError(
@@ -264,8 +272,11 @@ class ProteinGraphBuilder:
             raise ValueError(
                 f"Invalid rSASA in structure '{name}': input contains NaN or Inf values."
             )
+        if not np.isfinite(anm_msf_np).all():
+            raise ValueError(
+                f"Invalid ANM MSF in structure '{name}': input contains NaN or Inf values."
+            )
 
-        num_nodes = len(aa_list)
         if len(coords_np) != num_nodes:
             raise ValueError(
                 f"Length mismatch in structure '{name}': "
@@ -286,6 +297,11 @@ class ProteinGraphBuilder:
                 f"Length mismatch in structure '{name}': "
                 f"got {num_nodes} amino acids but {len(rsasa_np)} rSASA values."
             )
+        if len(anm_msf_np) != num_nodes:
+            raise ValueError(
+                f"Length mismatch in structure '{name}': "
+                f"got {num_nodes} amino acids but {len(anm_msf_np)} ANM MSF values."
+            )
         if len(nodes) != num_nodes:
             raise ValueError(
                 f"Length mismatch in structure '{name}': "
@@ -298,13 +314,21 @@ class ProteinGraphBuilder:
             torch.from_numpy(occupancies_np).float().unsqueeze(1)
         )  # (N, 1)
         rsasa_tensor = torch.from_numpy(rsasa_np).float().unsqueeze(1)  # (N, 1)
+        anm_msf_tensor = torch.from_numpy(anm_msf_np).float().unsqueeze(1)  # (N, 1)
 
         # 2. Base Node Features: (N, 22) -> AA One-Hot + Sequence Scalars
         x_base = self._encode_node_feature(aa_list)
 
-        # 3. Concatenate Features: (N, 22) cat (N, 1) cat (N, 1) cat (N, 1) -> (N, 25)
+        # 3. Concatenate Features: (N, 22) + (N, 1) + (N, 1) + (N, 1) + (N, 1) -> (N, 26)
         x = torch.cat(
-            [x_base, rsasa_tensor, b_factors_tensor, occupancies_tensor], dim=1
+            [
+                x_base,
+                rsasa_tensor,
+                b_factors_tensor,
+                occupancies_tensor,
+                anm_msf_tensor,
+            ],
+            dim=1,
         )
 
         # 4. Extract Geometric Vectors & Scalar Distances: (E, 3) and (E, 1)
