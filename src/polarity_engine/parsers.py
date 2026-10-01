@@ -5,12 +5,13 @@ import freesasa
 import logging
 import numpy as np
 import scipy.linalg as la
+import torch
 
 from Bio.PDB import PDBParser
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 from Bio.PDB.Structure import Structure
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Union
 
 from polarity_engine.constants import (
     DEFAULT_MAX_ASA,
@@ -510,6 +511,44 @@ class StructureParser:
             "all_atom_names": all_atom_names,
             "all_atom_res_names": all_atom_res_names,
         }
+
+    @classmethod
+    def save_parsed_dict(
+        cls, parsed_dict: Dict[str, Any], output_path: Union[str, Path]
+    ) -> Path:
+        """
+        Serializes and saves the pre-parsed mmCIF dictionary to disk using PyTorch serialization.
+
+        Args:
+            parsed_dict (Dict[str, Any]): Dictionary returned by _parse_mmcif_fast_path or get_all_atom_coordinates.
+            output_path (Union[str, Path]): Destination file path (e.g., 'wt_parsed.pt').
+
+        Returns:
+            Path: Path object pointing to the saved file.
+        """
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        torch.save(parsed_dict, out_path)
+        return out_path
+
+    @classmethod
+    def load_parsed_dict(cls, input_path: Union[str, Path]) -> Dict[str, Any]:
+        """
+        Loads a pre-parsed mmCIF dictionary from disk.
+
+        Args:
+            input_path (Union[str, Path]): File path to the serialized PyTorch dictionary (.pt).
+
+        Returns:
+            Dict[str, Any]: Loaded dictionary containing atom coordinates and residue metadata.
+        """
+        in_path = Path(input_path)
+        if not in_path.exists():
+            raise FileNotFoundError(f"Parsed dictionary file not found at: {in_path}")
+
+        parsed_dict = torch.load(in_path, weights_only=False)
+        return parsed_dict
 
     @classmethod
     def _assign_vdw_radii(

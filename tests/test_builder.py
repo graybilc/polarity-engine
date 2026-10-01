@@ -18,6 +18,7 @@ from tests.mock_data import (
     MOCK_PROTEIN_CORRUPTED_NAN,
     MOCK_PROTEIN_SINGLE_RES,
     MOCK_PROTEIN_CORRUPTED_INF,
+    make_mock_parsed_dict,
 )
 
 SEQ_POS_COL = 21
@@ -474,3 +475,63 @@ class TestProteinGraphBuilder:
                 anm_msf_np=mismatched_anm_msf,
                 name=name,
             )
+
+    def test_build_from_parsed_dict_wrapper(self) -> None:
+        """
+        Tests build_from_parsed_dict unpacks parsed dictionaries and builds PyG graph.
+
+        Arrange:
+            Instantiate ProteinGraphBuilder, mock dictionary, and feature arrays.
+        Act:
+            Call build_from_parsed_dict.
+        Assert:
+            Verify returned object is a PyG Data tensor with expected dimensions.
+        """
+        # Arrange
+        builder = ProteinGraphBuilder(distance_cutoff=10.0)
+        parsed_dict = make_mock_parsed_dict(n_residues=5)
+        rsasa_np = np.array([0.5, 0.5, 0.5, 0.5, 0.5], dtype=np.float32)
+        anm_msf_np = np.array([0.2, 0.2, 0.2, 0.2, 0.2], dtype=np.float32)
+
+        # Act
+        graph = builder.build_from_parsed_dict(
+            parsed_dict=parsed_dict,
+            rsasa_np=rsasa_np,
+            anm_msf_np=anm_msf_np,
+            name="state_000",
+        )
+
+        # Assert
+        assert isinstance(graph, Data)
+        assert graph.x.shape[0] == 5  # 5 nodes
+        assert graph.x.shape[1] == 26  # 26 node feature channels
+        assert graph.name == "state_000"
+
+    def test_build_from_parsed_dict_handles_none_anm(self) -> None:
+        """
+        Ensures build_from_parsed_dict handles optional/None ANM MSF gracefully.
+
+        Arrange:
+            Instantiate builder and parsed dictionary with anm_msf_np set to None.
+        Act:
+            Construct graph via build_from_parsed_dict.
+        Assert:
+            Assert valid graph tensor generation without errors.
+        """
+        # Arrange
+        builder = ProteinGraphBuilder(distance_cutoff=10.0)
+        parsed_dict = make_mock_parsed_dict(n_residues=5)
+        rsasa_np = np.array([0.1, 0.2, 0.3, 0.4, 0.5], dtype=np.float32)
+
+        # Act
+        graph = builder.build_from_parsed_dict(
+            parsed_dict=parsed_dict,
+            rsasa_np=rsasa_np,
+            anm_msf_np=None,
+            name="state_001",
+        )
+
+        # Assert
+        assert isinstance(graph, Data)
+        assert graph.x.shape[0] == 5
+        assert graph.x.shape[1] == 26

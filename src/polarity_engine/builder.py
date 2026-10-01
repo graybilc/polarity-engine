@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch_geometric.data import Data
+from typing import Any
 
 from polarity_engine.constants import AMINO_ACID_TO_INDEX
 
@@ -348,4 +349,57 @@ class ProteinGraphBuilder:
 
         return Data(
             x=x, edge_index=edge_index, edge_attr=edge_attr, pos=coords, name=name
+        )
+
+    def build_from_parsed_dict(
+        self,
+        parsed_dict: dict[str, Any],
+        rsasa_np: np.ndarray,
+        anm_msf_np: np.ndarray | None = None,
+        name: str = "",
+    ) -> Data:
+        """
+        Unpacks a parsed or mutated MMCIF dictionary and delegates to build_graph.
+
+        Args:
+            parsed_dict: Dictionary returned by StructureParser or mutate_structure_dict
+                containing 'aa_residues', 'ca_coords', 'ca_b_factors', 'ca_occupancies',
+                'all_atom_keys', etc.
+            rsasa_np: Relative SASA values array of shape (N,).
+            anm_msf_np: ANM Mean-Square Fluctuation values array of shape (N,).
+                If None, defaults to zeros or baseline.
+            name: Identifier for the structure (e.g., 'state_101').
+
+        Returns:
+            Data: PyTorch Geometric graph data object.
+        """
+        # Extract amino acid 3-letter code sequence
+        aa_list = [res_name for _, res_name in parsed_dict["aa_residues"]]
+
+        # Extract C-alpha backbone coordinates, B-factors, and occupancies
+        coords_np = np.asarray(parsed_dict["ca_coords"], dtype=np.float32)
+        b_factors_np = np.asarray(parsed_dict["ca_b_factors"], dtype=np.float32)
+        occupancies_np = np.asarray(
+            parsed_dict.get("ca_occupancies", np.ones(len(aa_list))), dtype=np.float32
+        )
+
+        # Build node metadata tuples: (chain_id, seq_num_str, res_name_3let)
+        # Using all_atom_keys or aa_residues metadata
+        nodes = [
+            (chain_id, seq_num, res_name)
+            for (chain_id, seq_num), (_, res_name) in zip(
+                parsed_dict["all_atom_keys"], parsed_dict["aa_residues"]
+            )
+        ]
+
+        # Delegate directly to build_graph
+        return self.build_graph(
+            aa_list=aa_list,
+            coords_np=coords_np,
+            b_factors_np=b_factors_np,
+            occupancies_np=occupancies_np,
+            nodes=nodes,
+            rsasa_np=rsasa_np,
+            anm_msf_np=anm_msf_np,
+            name=name,
         )

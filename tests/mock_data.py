@@ -166,3 +166,56 @@ MOCK_RSASA_NP: np.ndarray = np.array([0.5, 0.0, 0.5, 1.0], dtype=np.float32)
 
 # 4-residue standard complex (normalized to [0, 1])
 MOCK_ANM_MSF_NP = np.array([0.25, 0.50, 0.75, 1.00], dtype=np.float32)
+
+"""
+Mock data factory functions and static test fixtures for unit tests.
+"""
+
+
+def make_mock_parsed_dict(n_residues: int = 5, n_heavy_atoms: int = 20) -> dict:
+    """
+    Generates a valid, minimal parsed dictionary matching StructureParser schema.
+
+    Args:
+        n_residues: Number of backbone C-alpha nodes (N).
+        n_heavy_atoms: Number of total heavy atoms (M).
+
+    Returns:
+        dict: Parsed structure dictionary containing aligned node and heavy-atom arrays.
+    """
+    aa_names = ["SER", "LEU", "SER", "GLY", "SER"]
+    res_nums = ["655", "656", "659", "660", "663"]
+
+    return {
+        "aa_list": aa_names[:n_residues],
+        "coords": np.random.randn(n_residues, 3).astype(np.float32),
+        "ca_coords": np.random.randn(n_residues, 3).astype(np.float32),
+        "b_factors": np.array(
+            [20.0, 25.0, 18.0, 30.0, 22.0][:n_residues], dtype=np.float32
+        ),
+        "ca_b_factors": np.array(
+            [20.0, 25.0, 18.0, 30.0, 22.0][:n_residues], dtype=np.float32
+        ),
+        "occupancies": np.ones(n_residues, dtype=np.float32),
+        "ca_occupancies": np.ones(n_residues, dtype=np.float32),
+        "aa_residues": [(res_nums[i], aa_names[i]) for i in range(n_residues)],
+        "nodes": [("B", res_nums[i], aa_names[i]) for i in range(n_residues)],
+        "all_atom_coords": np.random.randn(n_heavy_atoms, 3).astype(np.float64),
+        "all_atom_keys": [("B", "655")] * 4
+        + [("B", "656")] * 4
+        + [("B", "659")] * 4
+        + [("B", "660")] * 4
+        + [("B", "663")] * 4,
+        "all_atom_names": ["N", "CA", "C", "O"] * (n_heavy_atoms // 4),
+        "all_atom_res_names": ["SER", "LEU", "SER", "GLY", "SER"]
+        * (n_heavy_atoms // 4),
+        "sasa_map": {
+            ("B", "655"): 50.0,
+            ("B", "656"): 80.0,
+            ("B", "659"): 45.0,
+            ("B", "660"): 10.0,
+            ("B", "663"): 60.0,
+        },
+        "rsasa": np.array([0.4, 0.6, 0.3, 0.1, 0.5][:n_residues], dtype=np.float32),
+        "anm_msf": np.array([0.1, 0.2, 0.15, 0.3, 0.25][:n_residues], dtype=np.float32),
+    }

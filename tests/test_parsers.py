@@ -7,12 +7,14 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+from polarity_engine.constants import MAX_SASA_TIEN
 from polarity_engine.parsers import FastaParser, StructureParser
 from tests.mock_data import (
     MOCK_APKC_FASTA_CONTENT,
     MOCK_CIF_CONTENT,
     MOCK_LGL_FASTA_CONTENT,
     MOCK_PDB_CONTENT,
+    make_mock_parsed_dict,
 )
 
 
@@ -318,6 +320,47 @@ class TestStructureParserPublicAPI:
         with pytest.raises(ValueError, match="Unsupported file format"):
             StructureParser.parse(invalid_ext_file)
 
+    def test_save_and_load_parsed_dict(self, tmp_path: Path) -> None:
+        """
+        Tests PyTorch serialization round-trip for parsed dictionaries.
+
+        Arrange:
+            Construct a mock parsed dictionary and target path.
+        Act:
+            Save dictionary to disk and reload it using StructureParser.
+        Assert:
+            Verify output path existence and array value parity.
+        """
+        # Arrange
+        parsed_dict = make_mock_parsed_dict()
+        save_file = tmp_path / "cache" / "test_parsed.pt"
+
+        # Act
+        saved_path = StructureParser.save_parsed_dict(parsed_dict, save_file)
+        loaded_dict = StructureParser.load_parsed_dict(save_file)
+
+        # Assert
+        assert saved_path.exists()
+        assert saved_path == save_file
+        assert loaded_dict["aa_list"] == parsed_dict["aa_list"]
+        np.testing.assert_array_equal(loaded_dict["rsasa"], parsed_dict["rsasa"])
+
+    def test_load_parsed_dict_missing_file_raises_error(self) -> None:
+        """
+        Ensures load_parsed_dict raises FileNotFoundError on non-existent files.
+
+        Arrange:
+            Define an invalid file path.
+        Act & Assert:
+            Call load_parsed_dict and assert FileNotFoundError is raised.
+        """
+        # Arrange
+        invalid_path = Path("nonexistent_path_xyz.pt")
+
+        # Act & Assert
+        with pytest.raises(FileNotFoundError, match="Parsed dictionary file not found"):
+            StructureParser.load_parsed_dict(invalid_path)
+
 
 # ==============================================================================
 # WHITE-BOX TESTS: Isolated Internal Core Logic
@@ -427,3 +470,57 @@ class TestStructureParserInternalLogic:
         assert struct == mock_structure
         assert len(caplog.records) == 1
         assert "contains 3 models. Defaulting to Model 0." in caplog.text
+
+    def test_compute_allatom_sasa_dict_aggregation(self) -> None:
+        """
+        Tests in-memory FreeSASA execution and atomic surface area aggregation.
+
+        Arrange:
+            Prepare mock dictionary and patch freesasa.calcCoord C execution.
+        Act:
+            Execute compute_allatom_sasa_dict.
+        Assert:
+            Validate per-residue SASA area summation.
+        """
+        # Arrange
+        parsed_dict = make_mock_parsed_dict()
+        mock_result = MagicMock()
+        mock_result.nAtoms.return_value = len(parsed_dict["all_atom_names"])
+        mock_result.atomArea.side_effect = lambda i: 10.0  # 10.0 Å² per atom
+
+        # Act
+        with patch("freesasa.calcCoord", return_value=mock_result):
+            sasa_map = StructureParser.compute_allatom_sasa_dict(parsed_dict)
+
+        # Assert
+        assert isinstance(sasa_map, dict)
+        assert sasa_map[("B", "655")] == pytest.approx(40.0)  # 4 atoms * 10.0 Å²
+
+    def test_compute_rsasa_vector_clamping(self) -> None:
+        """
+        Tests MaxASA normalization and [0, 1] bounds clamping in _compute_rsasa_vector.
+
+        Arrange:
+            Define residue nodes and raw SASA map with an out-of-bounds area.
+        Act:
+            Calculate normalized rSASA vector.
+        Assert:
+            Verify output dtype, length, and clipping behavior against MaxASA constants.
+        """
+        # Arrange
+        nodes = [("B", "1", "ALA"), ("B", "2", "TRP")]
+        raw_sasa_ala = 60.5
+        raw_sasa_trp = 300.0  # TRP > max theoretical ASA (~259 Å²)
+        sasa_map = {("B", "1"): raw_sasa_ala, ("B", "2"): raw_sasa_trp}
+
+        expected_ala_rsasa = raw_sasa_ala / MAX_SASA_TIEN["ALA"]
+
+        # Act
+        rsasa_vec = StructureParser._compute_rsasa_vector(nodes, sasa_map)
+
+        # Assert
+        assert isinstance(rsasa_vec, np.ndarray)
+        assert rsasa_vec.dtype == np.float32
+        assert len(rsasa_vec) == 2
+        assert rsasa_vec[0] == pytest.approx(expected_ala_rsasa, abs=1e-5)
+        assert rsasa_vec[1] == 1.0  # Upper bound clamped to 1.0
