@@ -5,77 +5,64 @@ Generates mutated 8-state structural representations directly from
 the output of parsers.py _parse_mmcif_fast_path.
 """
 
-import argparse
 from typing import Any
 import copy
 import torch
 
-# Updated for human Llgl1 numbering in 8r3y.cif
-TARGET_RESIDUES = {
-    0: 655,  # Bit index 0 -> S655 (Human Llgl1 equiv to Drosophila S656)
-    1: 659,  # Bit index 1 -> S659 (Human Llgl1 equiv to Drosophila S660)
-    2: 663,  # Bit index 2 -> S663 (Human Llgl1 equiv to Drosophila S664)
+# Default target positions for Lgl1 / 8r3y
+DEFAULT_APKC_TARGETS = {
+    0: "655",  # Bit index 0 -> S655
+    1: "659",  # Bit index 1 -> S659
+    2: "663",  # Bit index 2 -> S663
 }
 
 
 def mutate_structure_dict(
-    parsed_dict: dict[str, Any], state_code: str
+    parsed_dict: dict[str, Any],
+    state_code: str,
+    target_residues: dict[int, str] = DEFAULT_APKC_TARGETS,
+    target_amino_acid: str = "GLU",
 ) -> dict[str, Any]:
     """
-    Applies phosphomimetic mutations (Ser -> Glu) to the dictionary
-    returned by _parse_mmcif_fast_path based on a 3-bit binary state_code.
+    Applies point mutations to a parsed structure dictionary based on an arbitrary N-bit binary state_code.
 
     Args:
-        parsed_dict (Dict[str, Any]): Dictionary output from _parse_mmcif_fast_path.
-        state_code (str): 3-bit string representing phospho-state (e.g., '101').
-
-    Returns:
-        Dict[str, Any]: Deep copy of parsed_dict with mutated residue names.
+        parsed_dict: Dictionary returned by StructureParser.parse().
+        state_code: N-bit binary string representing variant state (e.g., '101' or '1001').
+        target_residues: Mapping from bit index to target residue sequence numbers (e.g., {0: "655", 1: "659"}).
+        target_amino_acid: Residue code to substitute when bit is '1' (default: "GLU").
     """
     if (
         not isinstance(state_code, str)
-        or len(state_code) != 3
+        or len(state_code) != len(target_residues)
         or not set(state_code).issubset({"0", "1"})
     ):
         raise ValueError(
-            f"Invalid state_code '{state_code}': Expected a 3-bit binary string (e.g., '101')."
+            f"Invalid state_code '{state_code}': Expected a {len(target_residues)}-bit binary string."
         )
 
     mutated_dict = copy.deepcopy(parsed_dict)
-    target_seq_nums = {
-        TARGET_RESIDUES[idx] for idx, bit in enumerate(state_code) if bit == "1"
+
+    # Identify target residue numbers where bit is active ('1')
+    active_seq_nums = {
+        str(target_residues[idx]) for idx, bit in enumerate(state_code) if bit == "1"
     }
 
-    if not target_seq_nums:
+    if not active_seq_nums:
         return mutated_dict
 
-    # 1. Update C-alpha residues
+    # 1. Update C-alpha residue representations
     mutated_dict["aa_residues"] = [
-        (seq_num_str, "GLU" if seq_num_str in target_seq_nums else res_name)
+        (seq_num_str, target_amino_acid if seq_num_str in active_seq_nums else res_name)
         for seq_num_str, res_name in mutated_dict["aa_residues"]
     ]
 
-    # 2. Update all-atom residue names
+    # 2. Update all-atom residue representations
     mutated_dict["all_atom_res_names"] = [
-        "GLU" if seq_num_str in target_seq_nums else current_res_name
+        target_amino_acid if seq_num_str in active_seq_nums else current_res_name
         for (_, seq_num_str), current_res_name in zip(
             mutated_dict["all_atom_keys"], mutated_dict["all_atom_res_names"]
         )
     ]
 
     return mutated_dict
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Mutate Lgl phosphorylation state.")
-    parser.add_argument("--input", required=True, help="Input mmCIF file path")
-    parser.add_argument(
-        "--state", required=True, help="3-bit state vector string (e.g., '101')"
-    )
-    parser.add_argument("--output", required=True, help="Output mutant PDB file path")
-    parser.add_argument(
-        "--chain", default="B", help="Lgl chain ID in 8r3y (default: B)"
-    )
-
-    args = parser.parse_args()
-    mutate_structure(args.input, args.state, args.output, args.chain)
