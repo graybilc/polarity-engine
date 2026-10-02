@@ -35,6 +35,11 @@ wt_parsed_dict = StructureParser.parse(
 StructureParser.save_parsed_dict(wt_parsed_dict, 'wt_parsed.pt')
 "
     """
+
+    stub:
+    """
+    touch wt_parsed.pt
+    """
 }
 
 // 2. State Mutation
@@ -59,6 +64,11 @@ wt_dict = StructureParser.load_parsed_dict('${wt_parsed_pt}')
 mutated_dict = mutate_structure_dict(wt_dict, '${state_code}')
 torch.save(mutated_dict, 'mutated_dict_${state_code}.pt')
 "
+    """
+
+    stub:
+    """
+    touch mutated_dict_${state_code}.pt
     """
 }
 
@@ -88,6 +98,11 @@ rsasa_vec = StructureParser._compute_rsasa_vector(mutated_dict['nodes'], sasa_ma
 
 np.save('rsasa_${state_code}.npy', rsasa_vec)
 "
+    """
+
+    stub:
+    """
+    touch rsasa_${state_code}.npy
     """
 }
 
@@ -125,6 +140,11 @@ graph_data = builder.build_from_parsed_dict(
 
 torch.save(graph_data, 'graph_state_${state_code}.pt')
 "
+    """
+
+    stub:
+    """
+    touch graph_state_${state_code}.pt
     """
 }
 
