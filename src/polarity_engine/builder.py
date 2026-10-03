@@ -359,40 +359,72 @@ class ProteinGraphBuilder:
         name: str = "",
     ) -> Data:
         """
-        Unpacks a parsed or mutated MMCIF dictionary and delegates to build_graph.
+        Unpacks a parsed or mutated structure dictionary and delegates to build_graph.
+
+        Supports both multi-chain unified outputs (from `StructureParser.parse`) and
+        single-chain legacy outputs.
 
         Args:
-            parsed_dict: Dictionary returned by StructureParser or mutate_structure_dict
-                containing 'aa_residues', 'ca_coords', 'ca_b_factors', 'ca_occupancies',
-                'all_atom_keys', etc.
+            parsed_dict: Dictionary returned by `StructureParser.parse` or
+                `mutate_structure_dict` containing node feature vectors and heavy-atom payloads.
             rsasa_np: Relative SASA values array of shape (N,).
             anm_msf_np: ANM Mean-Square Fluctuation values array of shape (N,).
-                If None, defaults to zeros or baseline.
+                If None, defaults to zero or fallback values inside build_graph.
             name: Identifier for the structure (e.g., 'state_101').
 
         Returns:
             Data: PyTorch Geometric graph data object.
         """
-        # Extract amino acid 3-letter code sequence
-        aa_list = [res_name for _, res_name in parsed_dict["aa_residues"]]
-
-        # Extract C-alpha backbone coordinates, B-factors, and occupancies
-        coords_np = np.asarray(parsed_dict["ca_coords"], dtype=np.float32)
-        b_factors_np = np.asarray(parsed_dict["ca_b_factors"], dtype=np.float32)
-        occupancies_np = np.asarray(
-            parsed_dict.get("ca_occupancies", np.ones(len(aa_list))), dtype=np.float32
-        )
-
-        # Build node metadata tuples: (chain_id, seq_num_str, res_name_3let)
-        # Using all_atom_keys or aa_residues metadata
-        nodes = [
-            (chain_id, seq_num, res_name)
-            for (chain_id, seq_num), (_, res_name) in zip(
-                parsed_dict["all_atom_keys"], parsed_dict["aa_residues"]
+        # 1. Extract nodes metadata (chain_id, res_num, res_name)
+        if "nodes" in parsed_dict:
+            nodes = parsed_dict["nodes"]
+        elif "aa_residues" in parsed_dict and "all_atom_keys" in parsed_dict:
+            # Fallback for single-chain legacy dicts: pull chain_id from first heavy atom
+            chain_id = (
+                parsed_dict["all_atom_keys"][0][0]
+                if parsed_dict["all_atom_keys"]
+                else "A"
             )
-        ]
+            nodes = [
+                (chain_id, seq_num, res_name)
+                for seq_num, res_name in parsed_dict["aa_residues"]
+            ]
+        else:
+            raise KeyError(
+                "Neither 'nodes' nor valid ('aa_residues', 'all_atom_keys') found in parsed_dict."
+            )
 
-        # Delegate directly to build_graph
+        # 2. Extract amino acid sequence list (length N)
+        if "aa_list" in parsed_dict:
+            aa_list = parsed_dict["aa_list"]
+        else:
+            aa_list = [res_name for _, _, res_name in nodes]
+
+        # 3. Extract C-alpha backbone coordinates (length N)
+        if "coords" in parsed_dict:
+            coords_np = np.asarray(parsed_dict["coords"], dtype=np.float32)
+        elif "ca_coords" in parsed_dict:
+            coords_np = np.asarray(parsed_dict["ca_coords"], dtype=np.float32)
+        else:
+            raise KeyError("Neither 'coords' nor 'ca_coords' found in parsed_dict.")
+
+        # 4. Extract B-factors (length N)
+        if "b_factors" in parsed_dict:
+            b_factors_np = np.asarray(parsed_dict["b_factors"], dtype=np.float32)
+        elif "ca_b_factors" in parsed_dict:
+            b_factors_np = np.asarray(parsed_dict["ca_b_factors"], dtype=np.float32)
+        else:
+            b_factors_np = np.zeros(len(aa_list), dtype=np.float32)
+
+        # 5. Extract occupancies (length N)
+        if "occupancies" in parsed_dict:
+            occupancies_np = np.asarray(parsed_dict["occupancies"], dtype=np.float32)
+        elif "ca_occupancies" in parsed_dict:
+            occupancies_np = np.asarray(parsed_dict["ca_occupancies"], dtype=np.float32)
+        else:
+            occupancies_np = np.ones(len(aa_list), dtype=np.float32)
+
+        # 6. Delegate directly to build_graph
         return self.build_graph(
             aa_list=aa_list,
             coords_np=coords_np,

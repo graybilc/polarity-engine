@@ -38,3 +38,6 @@ filterwarnings = [
     "ignore::DeprecationWarning:torch.jit.*:",
     "ignore::DeprecationWarning:torch.*:",
 ]
+markers = [
+    "integration: End-to-end integration tests (e.g., Nextflow pipeline execution).",
+]

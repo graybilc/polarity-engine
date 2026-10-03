@@ -194,21 +194,28 @@ class TestStructureParserPublicAPI:
         Act:
             Invoke public entry point StructureParser.parse.
         Assert:
-            Verify compliance with 8-key schema contract, array dimensions, and float32 dtypes.
+            Verify compliance with 12-key schema contract, array dimensions, and float dtypes.
         """
         parsed_output = StructureParser.parse(mock_cif_file)
 
-        # Schema contract verification (8 keys total)
-        assert "aa_list" in parsed_output
-        assert "coords" in parsed_output
-        assert "b_factors" in parsed_output
-        assert "occupancies" in parsed_output
-        assert "nodes" in parsed_output
-        assert "sasa_map" in parsed_output
-        assert "rsasa" in parsed_output
-        assert "anm_msf" in parsed_output
+        # 1. Schema contract verification (12 keys total)
+        expected_keys = {
+            "aa_list",
+            "coords",
+            "b_factors",
+            "occupancies",
+            "nodes",
+            "sasa_map",
+            "rsasa",
+            "anm_msf",
+            "all_atom_coords",
+            "all_atom_keys",
+            "all_atom_names",
+            "all_atom_res_names",
+        }
+        assert expected_keys.issubset(parsed_output.keys())
 
-        # Shape verification
+        # 2. Residue Node Shape Verification (N items)
         n_nodes = len(parsed_output["aa_list"])
         assert parsed_output["coords"].shape == (n_nodes, 3)
         assert parsed_output["b_factors"].shape == (n_nodes,)
@@ -217,12 +224,21 @@ class TestStructureParserPublicAPI:
         assert parsed_output["rsasa"].shape == (n_nodes,)
         assert parsed_output["anm_msf"].shape == (n_nodes,)
 
-        # Type safety
+        # 3. Heavy-Atom Payload Shape Verification (M items)
+        m_heavy = len(parsed_output["all_atom_coords"])
+        assert m_heavy > 0
+        assert parsed_output["all_atom_coords"].shape == (m_heavy, 3)
+        assert len(parsed_output["all_atom_keys"]) == m_heavy
+        assert len(parsed_output["all_atom_names"]) == m_heavy
+        assert len(parsed_output["all_atom_res_names"]) == m_heavy
+
+        # 4. Type Safety Verification
         assert parsed_output["coords"].dtype == np.float32
         assert parsed_output["b_factors"].dtype == np.float32
         assert parsed_output["occupancies"].dtype == np.float32
         assert parsed_output["rsasa"].dtype == np.float32
         assert parsed_output["anm_msf"].dtype == np.float32
+        assert parsed_output["all_atom_coords"].dtype == np.float64
 
     def test_parse_pdb_returns_complete_schema(self, mock_pdb_file):
         """
@@ -231,16 +247,52 @@ class TestStructureParserPublicAPI:
         Act:
             Invoke public entry point StructureParser.parse.
         Assert:
-            Verify extracted PDB output schema and coordinate dimensions match expectations.
+            Verify compliance with 12-key schema contract, array dimensions, and float dtypes.
         """
         parsed_output = StructureParser.parse(mock_pdb_file)
 
+        # 1. Schema contract verification (12 keys total)
+        expected_keys = {
+            "aa_list",
+            "coords",
+            "b_factors",
+            "occupancies",
+            "nodes",
+            "sasa_map",
+            "rsasa",
+            "anm_msf",
+            "all_atom_coords",
+            "all_atom_keys",
+            "all_atom_names",
+            "all_atom_res_names",
+        }
+        assert expected_keys.issubset(parsed_output.keys())
+
+        # 2. Residue Node Shape Verification (N items)
         n_nodes = len(parsed_output["aa_list"])
         assert n_nodes > 0
         assert parsed_output["coords"].shape == (n_nodes, 3)
         assert parsed_output["b_factors"].shape == (n_nodes,)
         assert parsed_output["occupancies"].shape == (n_nodes,)
+        assert len(parsed_output["nodes"]) == n_nodes
+        assert parsed_output["rsasa"].shape == (n_nodes,)
         assert parsed_output["anm_msf"].shape == (n_nodes,)
+
+        # 3. Heavy-Atom Payload Shape Verification (M items)
+        m_heavy = len(parsed_output["all_atom_coords"])
+        assert m_heavy > 0
+        assert parsed_output["all_atom_coords"].shape == (m_heavy, 3)
+        assert len(parsed_output["all_atom_keys"]) == m_heavy
+        assert len(parsed_output["all_atom_names"]) == m_heavy
+        assert len(parsed_output["all_atom_res_names"]) == m_heavy
+
+        # 4. Type Safety Verification
+        assert parsed_output["coords"].dtype == np.float32
+        assert parsed_output["b_factors"].dtype == np.float32
+        assert parsed_output["occupancies"].dtype == np.float32
+        assert parsed_output["rsasa"].dtype == np.float32
+        assert parsed_output["anm_msf"].dtype == np.float32
+        assert parsed_output["all_atom_coords"].dtype == np.float64
 
     def test_parse_chain_filtering_restricts_output(self, mock_cif_file):
         """

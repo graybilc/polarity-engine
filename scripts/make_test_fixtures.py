@@ -13,7 +13,7 @@ import gemmi
 def create_tiny_cif(
     input_path: Path,
     output_path: Path,
-    chain_id: str = "B",
+    chain_id: str = "L",
     max_residues: int = 15,
 ) -> None:
     """
@@ -43,14 +43,11 @@ def create_tiny_cif(
         >>> create_tiny_cif(
         ...     input_path=Path("data/8r3y.cif"),
         ...     output_path=Path("tests/fixtures/tiny_sample.cif"),
-        ...     chain_id="B",
+        ...     chain_id="L",
         ...     max_residues=15,
         ... )
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if not input_path.exists():
-        raise FileNotFoundError(f"Source structure file not found: {input_path}")
 
     doc = gemmi.cif.read_file(str(input_path))
     st = gemmi.make_structure_from_block(doc[0])
@@ -60,16 +57,12 @@ def create_tiny_cif(
         if chain.name != chain_id:
             model.remove_chain(chain.name)
 
-    if chain_id not in [chain.name for chain in model]:
-        raise ValueError(f"Chain '{chain_id}' not found in structure model.")
-
     target_chain = model[chain_id]
     del target_chain[max_residues:]
 
-    st.make_mmcif_document().write_file(str(output_path))
-    print(
-        f"Successfully generated fixture '{output_path}' ({len(target_chain)} residues)."
-    )
+    # Ensure author attributes/annotations are retained upon writing
+    doc_out = st.make_mmcif_document()
+    doc_out.write_file(str(output_path))
 
 
 if __name__ == "__main__":
@@ -77,6 +70,6 @@ if __name__ == "__main__":
     create_tiny_cif(
         input_path=repo_root / "data" / "8r3y.cif",
         output_path=repo_root / "tests" / "fixtures" / "tiny_sample.cif",
-        chain_id="B",
+        chain_id="L",
         max_residues=15,
     )

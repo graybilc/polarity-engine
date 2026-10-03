@@ -1,8 +1,8 @@
-nextflow.enable.dsl=2
+nextflow.enable.dsl = 2
 
 params.cif_file  = "${projectDir}/data/8r3y.cif"
 params.outdir    = "${projectDir}/output/module2"
-params.lgl_chain = "B"
+params.lgl_chain = 'L'
 params.cutoff    = 8.0
 
 ch_state_codes = Channel.fromList([
@@ -12,21 +12,20 @@ ch_state_codes = Channel.fromList([
 
 // 1. One-shot parsing using StructureParser.parse()
 process PARSE_WT_CIF {
-    tag "Parse WT Reference"
+    tag 'Parse WT Reference'
     publishDir "${params.outdir}/parsed_cache", mode: 'copy'
 
     input:
     path cif_file
 
     output:
-    path "wt_parsed.pt", emit: wt_parsed
+    path 'wt_parsed.pt', emit: wt_parsed
 
     script:
     """
-    python3 -c "
+    uv run python -c "
 from polarity_engine.parsers import StructureParser
 
-# Full end-to-end extraction: Coords, rSASA, and ANM MSF
 wt_parsed_dict = StructureParser.parse(
     '${cif_file}',
     chain_ids=['${params.lgl_chain}']
@@ -37,9 +36,9 @@ StructureParser.save_parsed_dict(wt_parsed_dict, 'wt_parsed.pt')
     """
 
     stub:
-    """
+    '''
     touch wt_parsed.pt
-    """
+    '''
 }
 
 // 2. State Mutation
@@ -55,7 +54,7 @@ process MUTATE_STATE {
 
     script:
     """
-    python3 -c "
+    uv run python -c  "
 import torch
 from polarity_engine.parsers import StructureParser
 from polarity_engine.state_generator import mutate_structure_dict
@@ -85,7 +84,7 @@ process COMPUTE_STATE_RSASA {
 
     script:
     """
-    python3 -c "
+    uv run python -c  "
 import torch
 import numpy as np
 from polarity_engine.parsers import StructureParser
@@ -119,7 +118,7 @@ process BUILD_STATE_GRAPH {
 
     script:
     """
-    python3 -c "
+    uv run python -c  "
 import torch
 import numpy as np
 from polarity_engine.builder import ProteinGraphBuilder

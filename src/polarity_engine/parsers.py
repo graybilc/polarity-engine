@@ -404,6 +404,16 @@ class StructureParser:
             else "_atom_site.label_seq_id"
         )
 
+        # Look for author component ID first, fall back to canonical label component ID
+        comp_id_col = "_atom_site.auth_comp_id"
+        if comp_id_col not in mmcif_dict:
+            comp_id_col = "_atom_site.label_comp_id"
+
+        if comp_id_col not in mmcif_dict:
+            raise ValueError(
+                "Malformed mmCIF structure: Missing residue identifier column."
+            )
+
         required_keys = [
             "_atom_site.group_PDB",
             "_atom_site.auth_asym_id",
@@ -411,7 +421,7 @@ class StructureParser:
             "_atom_site.Cartn_x",
             "_atom_site.Cartn_y",
             "_atom_site.Cartn_z",
-            "_atom_site.auth_comp_id",
+            comp_id_col,
             seq_key,
             "_atom_site.B_iso_or_equiv",
             "_atom_site.occupancy",
@@ -455,7 +465,7 @@ class StructureParser:
             cols["_atom_site.Cartn_x"],
             cols["_atom_site.Cartn_y"],
             cols["_atom_site.Cartn_z"],
-            cols["_atom_site.auth_comp_id"],
+            cols[comp_id_col],
             cols[seq_key],
             cols["_atom_site.B_iso_or_equiv"],
             cols["_atom_site.occupancy"],
@@ -897,32 +907,40 @@ class StructureParser:
     @staticmethod
     def _validate_parsed_output(parsed_output: dict[str, Any], filename: str) -> None:
         """
-        Validates that output feature vectors satisfy strict N == N element alignment contracts.
+        Validates that output feature vectors satisfy strict element alignment contracts.
 
-        Executes defensive assertions across all 1D C-alpha node-level feature arrays and
-        metadata lists to guarantee strict index parity before returning data to the caller.
-        This prevents silent dimension mismatches from propagating downstream into PyTorch
-        Geometric tensor construction or graph edge-index builders.
+        Executes defensive assertions across all 1D C-alpha node-level feature arrays,
+        heavy-atom buffers, and metadata lists to guarantee index parity before returning
+        data to the caller. This prevents silent dimension mismatches from propagating downstream
+        into PyTorch Geometric tensor construction, graph edge-index builders, or FreeSASA.
 
         Contract Invariants Enforced:
-            - len(coords) == N
-            - len(nodes) == N
-            - len(b_factors) == N
-            - len(occupancies) == N
-            - len(rsasa) == N
-            - len(msf) == N
-            where N = len(aa_list) represents the total number of target C-alpha
-            residues in the aggregated structure.
+            Residue Node Alignment (N items):
+                - len(coords) == N
+                - len(nodes) == N
+                - len(b_factors) == N
+                - len(occupancies) == N
+                - len(rsasa) == N
+                - len(anm_msf) == N
+                where N = len(aa_list) represents the total number of target C-alpha
+                residues in the aggregated structure.
+
+            Heavy-Atom Alignment (M items):
+                - len(all_atom_coords) == M
+                - len(all_atom_keys) == M
+                - len(all_atom_names) == M
+                - len(all_atom_res_names) == M
+                where M represents the total number of heavy atoms across all parsed chains.
 
         Args:
-            parsed_output: The final dictionary assembled by `parse` containing coordinates,
-                node tuples, residue sequence names, B-factors, occupancies, and rSASA vectors.
+            parsed_output: The final dictionary assembled by `parse` containing residue-level
+                tensors, structural metadata, and heavy-atom SASA arrays.
             filename: Name or string path of the source structure file, used for diagnostic
                 formatting in error reporting.
 
         Raises:
-            ValueError: If any constituent vector length deviates from N, detailing
-                the exact dimension breakdown per array in the exception message.
+            ValueError: If any constituent vector length deviates from N for residue nodes
+                or M for heavy atoms, detailing the exact dimension breakdown in the exception message.
         """
         n_nodes = len(parsed_output["aa_list"])
         if not (
@@ -935,14 +953,29 @@ class StructureParser:
             == n_nodes
         ):
             raise ValueError(
-                f"Internal length mismatch in parsed output for '{filename}': "
+                f"Internal length mismatch in residue node features for '{filename}': "
                 f"got {n_nodes} residues, "
                 f"{len(parsed_output['coords'])} coordinates, "
                 f"{len(parsed_output['b_factors'])} b_factors, "
                 f"{len(parsed_output['occupancies'])} occupancies, "
-                f"{len(parsed_output['rsasa'])} rSASA values, and "
-                f"{len(parsed_output["anm_msf"])} Mean-Square Fluctuations and "
+                f"{len(parsed_output['rsasa'])} rSASA values, "
+                f"{len(parsed_output['anm_msf'])} Mean-Square Fluctuations, and "
                 f"{len(parsed_output['nodes'])} node metadata items."
+            )
+
+        m_heavy = len(parsed_output["all_atom_coords"])
+        if not (
+            len(parsed_output["all_atom_keys"])
+            == len(parsed_output["all_atom_names"])
+            == len(parsed_output["all_atom_res_names"])
+            == m_heavy
+        ):
+            raise ValueError(
+                f"Internal length mismatch in heavy-atom arrays for '{filename}': "
+                f"got {m_heavy} coordinate rows, "
+                f"{len(parsed_output['all_atom_keys'])} atom keys, "
+                f"{len(parsed_output['all_atom_names'])} atom names, and "
+                f"{len(parsed_output['all_atom_res_names'])} residue names."
             )
 
     @classmethod
@@ -988,18 +1021,25 @@ class StructureParser:
                 - "aa_list" (list[str]): Length N list of 3-letter amino acid names
                   (e.g., ["ALA", "GLY", ...]).
                 - "coords" (np.ndarray): Shape (N, 3), float32 C-alpha Cartesian
-                  coordinates in Angstroms (A).
+                  coordinates in Angstroms (Å).
                 - "b_factors" (np.ndarray): Shape (N,), float32 temperature factors.
                 - "occupancies" (np.ndarray): Shape (N,), float32 atom occupancies.
                 - "nodes" (list[tuple[str, str, str]]): Length N list of residue descriptors
                   formatted as `(chain_id, res_num, res_name)`.
                 - "sasa_map" (dict[tuple[str, str], float]): Keyed by `(chain_id, res_num)`,
-                  mapping to raw absolute Solvent Accessible Surface Area (A^2).
+                  mapping to raw absolute Solvent Accessible Surface Area (Å²).
                 - "rsasa" (np.ndarray): Shape (N,), float32 relative SASA values normalized
                   to [0.0, 1.0]. Non-standard amino acids default to a median ASA
-                  normalization factor (197.0 A^2).
-                - "msf" (np.ndarray):: Shape (N,) float32 Mean-Square fluctuation
-                   values normalized to [0.0, 1.0].
+                  normalization factor (197.0 Å²).
+                - "anm_msf" (np.ndarray): Shape (N,), float32 Mean-Square Fluctuation
+                  values derived from C-alpha ANM and normalized to [0.0, 1.0].
+                - "all_atom_coords" (np.ndarray): Shape (M, 3), float64 Cartesian
+                  coordinates for all heavy atoms across parsed chains.
+                - "all_atom_keys" (list[tuple[str, str]]): Length M list of `(chain_id, res_num)`
+                  descriptors mapping heavy atoms back to residue nodes.
+                - "all_atom_names" (list[str]): Length M list of atom names (e.g., "CA", "N", "CB").
+                - "all_atom_res_names" (list[str]): Length M list of 3-letter amino acid names
+                  for every heavy atom.
 
         Raises:
             ValueError: If `file_path` contains no valid chains, if none of the requested
@@ -1034,8 +1074,13 @@ class StructureParser:
             "sasa_map": sasa_map,
             "rsasa": rsasa_vec,
             "anm_msf": msf_features,
+            # Retain heavy-atom payload for downstream state-specific FreeSASA passes
+            "all_atom_coords": heavy_data["all_atom_coords"],
+            "all_atom_keys": heavy_data["all_atom_keys"],
+            "all_atom_names": heavy_data["all_atom_names"],
+            "all_atom_res_names": heavy_data["all_atom_res_names"],
         }
 
-        # 5. Contract validation
+        # 6. Contract validation
         cls._validate_parsed_output(parsed_output, path_obj.name)
         return parsed_output
