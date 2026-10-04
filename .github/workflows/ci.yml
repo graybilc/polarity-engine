@@ -23,10 +23,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Nextflow
-        uses: nextflow-io/setup-nextflow@v1
-        with:
-          nextflow-version: 'latest'
+      - name: Install Nextflow
+        run: |
+          curl -s https://get.nextflow.io | bash
+          sudo mv nextflow /usr/local/bin/
+          nextflow -version
 
       - name: Install uv and dependencies
         run: |
