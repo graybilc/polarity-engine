@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+from typing import Dict, Any, Union
+from pathlib import Path
+import json
 import logging
 import numpy as np
 import torch
@@ -13,6 +16,63 @@ from polarity_engine.constants import AMINO_ACID_TO_INDEX
 logger = logging.getLogger(__name__)
 
 
+def load_resolved_site_mapping(
+    mapping_json_path: Union[str, Path],
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Parses sequence alignment JSON metadata (ADR-0004) to map target sites.
+
+    Reads the JSON file produced by `align_cif_sequences.py` and maps each target
+    phosphorylation site ID to either its true modeled residue index or the
+    C-terminal boundary fallback anchor residue index if unmodeled in cryo-EM.
+
+    Args:
+        mapping_json_path (Union[str, Path]): Path to the `site_mapping.json` file
+            generated during sequence alignment.
+
+    Returns:
+        Dict[str, Dict[str, Any]]: Dictionary mapping target site IDs (e.g., '655')
+            to their resolved node mapping details:
+            {
+                "655": {
+                    "res_num": 588,      # Modeled residue or anchor residue number
+                    # True if fallback anchor was used (UNMODELED)
+                    "is_anchor": True,
+                    "aa": "E"            # Amino acid single-letter code at res_num
+                },
+                ...
+            }
+
+    Raises:
+        FileNotFoundError: If `mapping_json_path` does not exist.
+        KeyError: If expected keys are missing from the mapping JSON format.
+    """
+    path = Path(mapping_json_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Site mapping JSON not found: {path}")
+
+    with open(path, "r") as f:
+        data = json.load(f)
+
+    site_nodes = {}
+    for site_id, site_info in data.get("sites", {}).items():
+        status = site_info.get("status")
+        if status == "MODELED":
+            site_nodes[site_id] = {
+                "res_num": site_info["target_res_num"],
+                "is_anchor": False,
+                "aa": site_info.get("target_aa"),
+            }
+        elif status == "UNMODELED":
+            site_nodes[site_id] = {
+                "res_num": site_info["fallback_anchor_res_num"],
+                "is_anchor": True,
+                "aa": site_info.get("anchor_aa"),
+            }
+
+    return site_nodes
+
+
 class GaussianRBF(nn.Module):
     """
     Gaussian Radial Basis Function expansion module in pure PyTorch.
@@ -23,10 +83,10 @@ class GaussianRBF(nn.Module):
     safety.
 
     Attributes:
-       mu (torch.Tensor): Registered buffer containing kernel centers of shape
+       mu(torch.Tensor): Registered buffer containing kernel centers of shape
         (num_gaussians,).
-       gamma (torch.Tensor): Registered scalar buffer controlling kernel width
-        precision (1 / delta^2).
+       gamma(torch.Tensor): Registered scalar buffer controlling kernel width
+        precision(1 / delta ^ 2).
     """
 
     def __init__(self, start: float = 0.0, stop: float = 8.0, num_gaussians: int = 16):
@@ -34,9 +94,9 @@ class GaussianRBF(nn.Module):
         Initializes kernel centers and width parameters.
 
         Args:
-            start: Lower spatial distance bound in Ångströms (typically 0.0).
-            stop: Upper spatial distance cutoff in Ångströms (e.g., 8.0).
-            num_gaussians: Number of radial basis functions (K channels).
+            start: Lower spatial distance bound in Ångströms(typically 0.0).
+            stop: Upper spatial distance cutoff in Ångströms(e.g., 8.0).
+            num_gaussians: Number of radial basis functions(K channels).
         """
         super().__init__()
         # Spaced centers (mu) from start to stop
@@ -55,10 +115,10 @@ class GaussianRBF(nn.Module):
         Expands scalar edge distances into Gaussian RBF feature vectors.
 
         Args:
-            dist: Pairwise scalar distance tensor of shape (E,) or (E, 1).
+            dist: Pairwise scalar distance tensor of shape(E,) or (E, 1).
 
         Returns:
-            Expanded distance feature matrix of shape (E, num_gaussians).
+            Expanded distance feature matrix of shape(E, num_gaussians).
         """
         # Ensure shape is (E, 1)
         if dist.dim() == 1:
@@ -74,9 +134,9 @@ class ProteinGraphBuilder:
     End-to-end pipeline for constructing PyTorch Geometric Data objects from parsed structure dicts.
 
     Attributes:
-        distance_cutoff (float): Maximum spatial interaction distance threshold
+        distance_cutoff(float): Maximum spatial interaction distance threshold
             in Ångströms.
-        rbf_module (GaussianRBF): Pure PyTorch radial basis function module for
+        rbf_module(GaussianRBF): Pure PyTorch radial basis function module for
             distance expansion.
     """
 
@@ -85,7 +145,7 @@ class ProteinGraphBuilder:
         Initializes builder with geometric interaction cutoffs and kernel configurations.
 
         Args:
-            distance_cutoff: Spatial distance threshold in Ångströms (default: 8.0).
+            distance_cutoff: Spatial distance threshold in Ångströms(default: 8.0).
             num_rbf_kernels: Number of Gaussian channels for distance expansion
                 (default: 16).
         """
@@ -99,11 +159,11 @@ class ProteinGraphBuilder:
         Encodes 21-dim one-hot amino acid identity and 1-dim normalized sequence position.
 
         Args:
-            aa_list: Sequence of 3-letter amino acid code strings (e.g., ['ALA',
+            aa_list: Sequence of 3-letter amino acid code strings(e.g., ['ALA',
             'GLY', 'SER']). Non-standard codes default to 'UNK'.
 
         Returns:
-            torch.Tensor: Float32 node feature matrix of shape (N, 22), where N =
+            torch.Tensor: Float32 node feature matrix of shape(N, 22), where N =
             len(aa_list).
         """
         # Map residue strings to integer indices safely
@@ -133,13 +193,13 @@ class ProteinGraphBuilder:
         Converts a dense pairwise distance matrix to PyTorch Geometric COO edge_index format.
 
         Args:
-            dist_matrix: Pairwise distance tensor of shape (N, N).
-            include_self_loops: Whether diagonal self-connections (i == j) are
+            dist_matrix: Pairwise distance tensor of shape(N, N).
+            include_self_loops: Whether diagonal self-connections(i == j) are
                 retained.
 
         Returns:
             tuple[torch.Tensor, int]:
-                - edge_index: Long tensor of shape (2, E) containing source and target
+                - edge_index: Long tensor of shape(2, E) containing source and target
                     indices.
                 - num_edges: Total number of active edges E.
         """
@@ -164,13 +224,13 @@ class ProteinGraphBuilder:
         Computes sparse COO topology, displacement vectors, scalar distances, and unit direction vectors.
 
         Args:
-            coords: NumPy array of C-alpha coordinates of shape (N, 3).
+            coords: NumPy array of C-alpha coordinates of shape(N, 3).
 
         Returns:
             dict[str, torch.Tensor]: Dictionary containing:
-                - 'edge_index': Long tensor of shape (2, E)
-                - 'dist_scalar': Float32 distance tensor of shape (E, 1)
-                - 'unit_vec': Float32 unit directional vector of shape (E, 3)
+                - 'edge_index': Long tensor of shape(2, E)
+                - 'dist_scalar': Float32 distance tensor of shape(E, 1)
+                - 'unit_vec': Float32 unit directional vector of shape(E, 3)
         """
         # Convert to float32 tensor
         coords_torch = torch.from_numpy(coords).float()
@@ -202,11 +262,11 @@ class ProteinGraphBuilder:
         Computes binary flag indicating if an edge crosses chain boundaries.
 
         Args:
-            edge_index: Long tensor of shape (2, E).
-            nodes: List of (chain_id, res_num, res_name) node metadata of length N.
+            edge_index: Long tensor of shape(2, E).
+            nodes: List of(chain_id, res_num, res_name) node metadata of length N.
 
         Returns:
-            torch.Tensor: Float32 tensor of shape (E, 1) where 1.0 indicates an
+            torch.Tensor: Float32 tensor of shape(E, 1) where 1.0 indicates an
             inter-subunit interface edge and 0.0 indicates an intra-chain edge.
         """
         num_edges = edge_index.shape[1]
@@ -239,17 +299,17 @@ class ProteinGraphBuilder:
 
         Args:
             aa_list: Sequence of 3-letter amino acid codes of length N.
-            coords_np: NumPy array of C-alpha coordinates of shape (N, 3).
-            b_factors_np: NumPy array of residue B-factors of shape (N,).
-            occupancies_np: NumPy array of residue occupancies of shape (N,).
-            nodes: List of (chain_id, res_num_str, res_name_3let) corresponding to PyG nodes.
-            rsasa_np: NumPy array of relative SASA values of shape (N,).
-            anm_msf_np: NumPy array of normalized Mean-Square Fluctuations of shape (N,).
-                If None, defaults to zeros of shape (N,).
+            coords_np: NumPy array of C-alpha coordinates of shape(N, 3).
+            b_factors_np: NumPy array of residue B-factors of shape(N,).
+            occupancies_np: NumPy array of residue occupancies of shape(N,).
+            nodes: List of(chain_id, res_num_str, res_name_3let) corresponding to PyG nodes.
+            rsasa_np: NumPy array of relative SASA values of shape(N,).
+            anm_msf_np: NumPy array of normalized Mean-Square Fluctuations of shape(N,).
+                If None, defaults to zeros of shape(N,).
             name: Structural identifier or complex name metadata.
 
         Returns:
-            Data: PyTorch Geometric Data instance with x (N, 26), edge_index, edge_attr, pos, and name.
+            Data: PyTorch Geometric Data instance with x(N, 26), edge_index, edge_attr, pos, and name.
         """
         num_nodes = len(aa_list)
 
@@ -356,24 +416,34 @@ class ProteinGraphBuilder:
         parsed_dict: dict[str, Any],
         rsasa_np: np.ndarray,
         anm_msf_np: np.ndarray | None = None,
+        site_mapping: dict = None,
         name: str = "",
     ) -> Data:
-        """
-        Unpacks a parsed or mutated structure dictionary and delegates to build_graph.
+        """Unpacks a parsed structure dictionary and delegates to build_graph.
 
-        Supports both multi-chain unified outputs (from `StructureParser.parse`) and
-        single-chain legacy outputs.
+        Supports multi-chain unified outputs (from `StructureParser.parse`),
+        single-chain legacy dicts, and attaches optional site alignment metadata
+        (ADR-0004 fallback anchors) to the resulting PyG Data object.
 
         Args:
-            parsed_dict: Dictionary returned by `StructureParser.parse` or
-                `mutate_structure_dict` containing node feature vectors and heavy-atom payloads.
-            rsasa_np: Relative SASA values array of shape (N,).
-            anm_msf_np: ANM Mean-Square Fluctuation values array of shape (N,).
-                If None, defaults to zero or fallback values inside build_graph.
-            name: Identifier for the structure (e.g., 'state_101').
+            parsed_dict (dict[str, Any]): Dictionary returned by `StructureParser.parse`
+                or `mutate_structure_dict` containing node features and coordinate arrays.
+            rsasa_np (np.ndarray): Relative SASA values array of shape (N,).
+            anm_msf_np (np.ndarray | None, optional): ANM Mean-Square Fluctuation values
+                array of shape (N,). If None, defaults to zeros inside `build_graph`.
+            site_mapping (dict[str, Any] | None, optional): Target site alignment mapping
+                dictionary loaded via `load_resolved_site_mapping` (ADR-0004). If provided,
+                it is assigned directly to `graph_data.site_mapping`. Defaults to None.
+            name (str, optional): Identifier for the structure (e.g., 'state_101').
+                Defaults to "".
 
         Returns:
-            Data: PyTorch Geometric graph data object.
+            Data: PyTorch Geometric `Data` instance containing node features (`x`),
+            edge indices (`edge_index`), edge features (`edge_attr`), spatial positions (`pos`),
+            and attached metadata (`name`, `site_mapping`).
+
+        Raises:
+            KeyError: If required keys (`nodes`, `coords`, etc.) cannot be found in `parsed_dict`.
         """
         # 1. Extract nodes metadata (chain_id, res_num, res_name)
         if "nodes" in parsed_dict:
@@ -425,7 +495,7 @@ class ProteinGraphBuilder:
             occupancies_np = np.ones(len(aa_list), dtype=np.float32)
 
         # 6. Delegate directly to build_graph
-        return self.build_graph(
+        graph_data = self.build_graph(
             aa_list=aa_list,
             coords_np=coords_np,
             b_factors_np=b_factors_np,
@@ -435,3 +505,6 @@ class ProteinGraphBuilder:
             anm_msf_np=anm_msf_np,
             name=name,
         )
+        if site_mapping:
+            graph_data.site_mapping = site_mapping
+        return graph_data

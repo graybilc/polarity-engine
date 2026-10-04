@@ -4,19 +4,48 @@ params.cif_file  = "${projectDir}/data/8r3y.cif"
 params.outdir    = "${projectDir}/output/module2"
 params.lgl_chain = 'L'
 params.cutoff    = 8.0
+params.sites     = '655,659,663'
 
 ch_state_codes = Channel.fromList([
     '000', '100', '010', '001',
     '110', '101', '011', '111'
 ])
 
-// 1. One-shot parsing using StructureParser.parse()
-process PARSE_WT_CIF {
-    tag 'Parse WT Reference'
-    publishDir "${params.outdir}/parsed_cache", mode: 'copy'
+// 0. Align & Verify Target Phosphorylation Sites (ADR-0004)
+process ALIGN_CIF_SEQUENCES {
+    tag 'Align CIF Target Sites'
+    publishDir "${params.outdir}/alignment", mode: 'copy'
 
     input:
     path cif_file
+    val sites
+    val chain
+
+    output:
+    path 'site_mapping.json', emit: site_mapping
+
+    script:
+    """
+    uv run python ${projectDir}/scripts/align_cif_sequences.py \
+        --cif ${cif_file} \
+        --sites "${sites}" \
+        --chain ${chain} \
+        --out site_mapping.json
+    """
+
+    stub:
+    '''
+    touch site_mapping.json
+    '''
+}
+
+// 1. One-shot parsing using StructureParser.parse()
+process PARSE_WT_CIF {
+    tag 'Parse WT Reference'
+
+    input:
+    path cif_file
+    path site_mapping_json
 
     output:
     path 'wt_parsed.pt', emit: wt_parsed
@@ -24,17 +53,24 @@ process PARSE_WT_CIF {
     script:
     """
     uv run python -c "
-from polarity_engine.parsers import StructureParser
+    import json
+    from polarity_engine.parsers import StructureParser
 
-wt_parsed_dict = StructureParser.parse(
-    '${cif_file}',
-    chain_ids=['${params.lgl_chain}']
-)
+    with open('${site_mapping_json}') as f:
+        mapping_data = json.load(f)
 
-StructureParser.save_parsed_dict(wt_parsed_dict, 'wt_parsed.pt')
-"
+    # Parse structural coordinates
+    wt_parsed_dict = StructureParser.parse(
+        '${cif_file}',
+        chain_ids=['L']
+    )
+
+    # Attach/apply site mapping metadata
+    wt_parsed_dict['site_mapping'] = mapping_data.get('sites', mapping_data)
+
+    StructureParser.save_parsed_dict(wt_parsed_dict, 'wt_parsed.pt')
+    "
     """
-
     stub:
     '''
     touch wt_parsed.pt
@@ -148,13 +184,27 @@ torch.save(graph_data, 'graph_state_${state_code}.pt')
 }
 
 workflow {
-    PARSE_WT_CIF(params.cif_file)
+    // 0. Resolve target site coordinates / fallback anchors
+    ALIGN_CIF_SEQUENCES(
+        params.cif_file,
+        params.sites,
+        params.lgl_chain
+    )
 
+    // 1. Pass mapping JSON into parse step
+    PARSE_WT_CIF(
+        params.cif_file,
+        ALIGN_CIF_SEQUENCES.out.site_mapping
+    )
+
+    // 2. State Combinatorics
     ch_mutate_inputs = ch_state_codes.combine(PARSE_WT_CIF.out.wt_parsed)
     MUTATE_STATE(ch_mutate_inputs)
 
+    // 3. Feature Generation
     COMPUTE_STATE_RSASA(MUTATE_STATE.out.mutated_dict)
 
+    // 4. Graph Tensor Assembly
     ch_graph_inputs = MUTATE_STATE.out.mutated_dict.join(COMPUTE_STATE_RSASA.out.rsasa_npy)
     BUILD_STATE_GRAPH(ch_graph_inputs)
 }

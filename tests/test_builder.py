@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 
+import json
 import numpy as np
 import pytest
 import torch
+from pathlib import Path
 from torch_geometric.data import Data
 
-from polarity_engine.builder import ProteinGraphBuilder
+from polarity_engine.builder import ProteinGraphBuilder, load_resolved_site_mapping
 from tests.mock_data import (
     MOCK_NODES,
     MOCK_AA_LIST,
@@ -102,6 +104,55 @@ def corrupted_protein_inf():
         MOCK_PROTEIN_CORRUPTED_INF["anm_msf"],
         MOCK_PROTEIN_CORRUPTED_INF["name"],
     )
+
+
+@pytest.fixture
+def mock_site_mapping_json(tmp_path: Path) -> Path:
+    """Creates a temporary site_mapping.json containing MODELED and UNMODELED sites."""
+    mapping_data = {
+        "sites": {
+            "250": {
+                "status": "MODELED",
+                "target_res_num": 250,
+                "target_aa": "SER",
+            },
+            "655": {
+                "status": "UNMODELED",
+                "fallback_anchor_res_num": 588,
+                "anchor_aa": "GLU",
+            },
+        }
+    }
+    json_path = tmp_path / "site_mapping.json"
+    with open(json_path, "w") as f:
+        json.dump(mapping_data, f)
+    return json_path
+
+
+class TestLoadResolvedSiteMapping:
+    """Groups unit tests validating load_resolved_site_mapping (ADR-0004)."""
+
+    def test_load_resolved_site_mapping_success(self, mock_site_mapping_json: Path):
+        """
+        Arrange:
+            Prepare mock site_mapping.json with MODELED and UNMODELED target sites.
+        Act:
+            Parse site mapping JSON via load_resolved_site_mapping.
+        Assert:
+            Verify MODELED sites preserve original residue IDs and UNMODELED sites
+            fallback to anchor residue IDs with is_anchor=True.
+        """
+        mapping = load_resolved_site_mapping(mock_site_mapping_json)
+
+        assert "250" in mapping
+        assert mapping["250"]["res_num"] == 250
+        assert mapping["250"]["is_anchor"] is False
+        assert mapping["250"]["aa"] == "SER"
+
+        assert "655" in mapping
+        assert mapping["655"]["res_num"] == 588
+        assert mapping["655"]["is_anchor"] is True
+        assert mapping["655"]["aa"] == "GLU"
 
 
 class TestProteinGraphBuilder:
@@ -481,23 +532,25 @@ class TestProteinGraphBuilder:
         Tests build_from_parsed_dict unpacks parsed dictionaries and builds PyG graph.
 
         Arrange:
-            Instantiate ProteinGraphBuilder, mock dictionary, and feature arrays.
+            Instantiate ProteinGraphBuilder, mock dictionary, site mapping, and feature arrays.
         Act:
-            Call build_from_parsed_dict.
+            Call build_from_parsed_dict with site_mapping parameter.
         Assert:
-            Verify returned object is a PyG Data tensor with expected dimensions.
+            Verify returned object is a PyG Data tensor with expected dimensions and attached mapping.
         """
         # Arrange
         builder = ProteinGraphBuilder(distance_cutoff=10.0)
         parsed_dict = make_mock_parsed_dict(n_residues=5)
         rsasa_np = np.array([0.5, 0.5, 0.5, 0.5, 0.5], dtype=np.float32)
         anm_msf_np = np.array([0.2, 0.2, 0.2, 0.2, 0.2], dtype=np.float32)
+        mock_site_mapping = {"655": {"res_num": 588, "is_anchor": True, "aa": "GLU"}}
 
         # Act
         graph = builder.build_from_parsed_dict(
             parsed_dict=parsed_dict,
             rsasa_np=rsasa_np,
             anm_msf_np=anm_msf_np,
+            site_mapping=mock_site_mapping,
             name="state_000",
         )
 
@@ -506,6 +559,8 @@ class TestProteinGraphBuilder:
         assert graph.x.shape[0] == 5  # 5 nodes
         assert graph.x.shape[1] == 26  # 26 node feature channels
         assert graph.name == "state_000"
+        assert hasattr(graph, "site_mapping")
+        assert graph.site_mapping == mock_site_mapping
 
     def test_build_from_parsed_dict_handles_none_anm(self) -> None:
         """
@@ -535,3 +590,4 @@ class TestProteinGraphBuilder:
         assert isinstance(graph, Data)
         assert graph.x.shape[0] == 5
         assert graph.x.shape[1] == 26
+        assert not hasattr(graph, "site_mapping") or graph.site_mapping is None
