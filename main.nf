@@ -6,38 +6,8 @@ params.lgl_chain = 'L'
 params.cutoff    = 8.0
 params.sites     = '655,659,663'
 
-ch_state_codes = Channel.fromList([
-    '000', '100', '010', '001',
-    '110', '101', '011', '111'
-])
-
-// 0. Align & Verify Target Phosphorylation Sites (ADR-0004)
-process ALIGN_CIF_SEQUENCES {
-    tag 'Align CIF Target Sites'
-    publishDir "${params.outdir}/alignment", mode: 'copy'
-
-    input:
-    path cif_file
-    val sites
-    val chain
-
-    output:
-    path 'site_mapping.json', emit: site_mapping
-
-    script:
-    """
-    uv run python ${projectDir}/scripts/align_cif_sequences.py \
-        --cif ${cif_file} \
-        --sites "${sites}" \
-        --chain ${chain} \
-        --out site_mapping.json
-    """
-
-    stub:
-    '''
-    touch site_mapping.json
-    '''
-}
+// Import process definition
+include { ALIGN_CIF } from './processes/align_cif'
 
 // 1. One-shot parsing using StructureParser.parse()
 process PARSE_WT_CIF {
@@ -53,24 +23,25 @@ process PARSE_WT_CIF {
     script:
     """
     uv run python -c "
-    import json
-    from polarity_engine.parsers import StructureParser
+import json
+from polarity_engine.parsers import StructureParser
 
-    with open('${site_mapping_json}') as f:
-        mapping_data = json.load(f)
+with open('${site_mapping_json}') as f:
+    mapping_data = json.load(f)
 
-    # Parse structural coordinates
-    wt_parsed_dict = StructureParser.parse(
-        '${cif_file}',
-        chain_ids=['L']
-    )
+# Parse structural coordinates
+wt_parsed_dict = StructureParser.parse(
+    '${cif_file}',
+    chain_ids=['L']
+)
 
-    # Attach/apply site mapping metadata
-    wt_parsed_dict['site_mapping'] = mapping_data.get('sites', mapping_data)
+# Attach/apply site mapping metadata
+wt_parsed_dict['site_mapping'] = mapping_data.get('sites', mapping_data)
 
-    StructureParser.save_parsed_dict(wt_parsed_dict, 'wt_parsed.pt')
-    "
+StructureParser.save_parsed_dict(wt_parsed_dict, 'wt_parsed.pt')
+"
     """
+
     stub:
     '''
     touch wt_parsed.pt
@@ -90,7 +61,7 @@ process MUTATE_STATE {
 
     script:
     """
-    uv run python -c  "
+    uv run python -c "
 import torch
 from polarity_engine.parsers import StructureParser
 from polarity_engine.state_generator import mutate_structure_dict
@@ -120,7 +91,7 @@ process COMPUTE_STATE_RSASA {
 
     script:
     """
-    uv run python -c  "
+    uv run python -c "
 import torch
 import numpy as np
 from polarity_engine.parsers import StructureParser
@@ -154,7 +125,7 @@ process BUILD_STATE_GRAPH {
 
     script:
     """
-    uv run python -c  "
+    uv run python -c "
 import torch
 import numpy as np
 from polarity_engine.builder import ProteinGraphBuilder
@@ -184,8 +155,13 @@ torch.save(graph_data, 'graph_state_${state_code}.pt')
 }
 
 workflow {
-    // 0. Resolve target site coordinates / fallback anchors
-    ALIGN_CIF_SEQUENCES(
+    ch_state_codes = Channel.fromList([
+        '000', '100', '010', '001',
+        '110', '101', '011', '111'
+    ])
+
+    // 0. Align & Verify Target Phosphorylation Sites
+    ALIGN_CIF(
         params.cif_file,
         params.sites,
         params.lgl_chain
@@ -194,7 +170,7 @@ workflow {
     // 1. Pass mapping JSON into parse step
     PARSE_WT_CIF(
         params.cif_file,
-        ALIGN_CIF_SEQUENCES.out.site_mapping
+        ALIGN_CIF.out.site_mapping
     )
 
     // 2. State Combinatorics
