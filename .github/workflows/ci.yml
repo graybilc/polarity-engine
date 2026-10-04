@@ -9,30 +9,29 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
-    # 1. Check out the repository code
-    - name: Check out repository
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    # 2. Set up uv and pin the Python version
-    - name: Set up uv
-      uses: astral-sh/setup-uv@v5
-      with:
-        version: "latest"
-        enable-cache: true # Speeds up runs by caching your uv environment
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-    # 3. Ensure Python 3.13 is available
-    - name: Set up Python
-      run: uv python install 3.12
+      - name: Set up Java (Required for Nextflow)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-    # 4. Sync dependencies strictly using your uv.lock file
-    - name: Install dependencies
-      run: uv sync --frozen
+      - name: Setup Nextflow
+        uses: wf-community/setup-nextflow@v1
+        with:
+          version: 'latest'
 
-    # 5. Execute the test suite within the uv virtual environment
-    - name: Run test suite with Pytest
-      env:
-        PYTHONPATH: .
-      run: |
-        uv run pytest -v
+      - name: Install uv and dependencies
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          uv sync
+
+      - name: Run Pytest Suite
+        run: uv run pytest
