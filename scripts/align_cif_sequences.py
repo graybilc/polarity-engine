@@ -34,7 +34,8 @@ THREE_TO_ONE = {
 
 
 def parse_args(args: List[str] | None = None) -> argparse.Namespace:
-    """Parses command-line arguments for CIF sequence alignment.
+    """
+    Parses command-line arguments for CIF sequence alignment.
 
     Args:
         args (List[str] | None, optional): Explicit list of command-line argument
@@ -56,7 +57,8 @@ def parse_args(args: List[str] | None = None) -> argparse.Namespace:
 
 
 def parse_site_list(sites_str: str) -> List[int]:
-    """Parses comma-separated target site strings into an ordered list of residue numbers.
+    """
+    Parses comma-separated target site strings into an ordered list of residue numbers.
 
     Args:
         sites_str (str): Comma-separated string of target site numbers (e.g., "655, 659, 663").
@@ -74,7 +76,8 @@ def parse_site_list(sites_str: str) -> List[int]:
 
 
 def get_all_chain_sequences(cif_path: str) -> Dict[str, Tuple[str, List[int]]]:
-    """Parses MMCIF file and extracts sequences and residue indices per chain.
+    """
+    Parses MMCIF file and extracts sequences and residue indices per chain.
 
     Args:
         cif_path (str): Path to MMCIF structure file.
@@ -109,7 +112,8 @@ def get_all_chain_sequences(cif_path: str) -> Dict[str, Tuple[str, List[int]]]:
 def find_best_matching_chain(
     ref_seq: str, chains_data: Dict[str, Tuple[str, List[int]]]
 ) -> str | None:
-    """Finds the chain ID in target structure that best matches the reference sequence.
+    """
+    Finds the chain ID in target structure that best matches the reference sequence.
 
     Args:
         ref_seq (str): Reference amino acid sequence string.
@@ -141,7 +145,8 @@ def map_target_residues(
     target_sites: List[int],
     ref_chain_id: str | None = None,
 ) -> Dict[str, Any]:
-    """Aligns target structure to reference structure and checks for site presence.
+    """
+    Aligns target structure to reference structure and checks for site presence.
 
     Determines whether each target site is MODELED in the target structure or UNMODELED.
     Unmodeled sites fall back to the resolved C-terminal boundary residue (ADR-0004 anchor).
@@ -255,7 +260,8 @@ def map_target_residues(
 
 
 def main(cli_args: List[str] | None = None) -> None:
-    """Main execution entry point for sequence alignment script.
+    """
+    Main execution entry point for sequence alignment script.
 
     Parses command-line arguments, executes CIF target sequence alignment,
     and writes JSON results directly to the specified `--out` path.
