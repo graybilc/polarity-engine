@@ -24,9 +24,9 @@ jobs:
           java-version: '17'
 
       - name: Setup Nextflow
-        uses: wf-community/setup-nextflow@v1
+        uses: nextflow-io/setup-nextflow@v1
         with:
-          version: 'latest'
+          nextflow-version: 'latest'
 
       - name: Install uv and dependencies
         run: |
