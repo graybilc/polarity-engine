@@ -3,8 +3,11 @@ repos:
     rev: v4.6.0
     hooks:
       - id: trailing-whitespace
+        stages: [pre-commit]
       - id: end-of-file-fixer
+        stages: [pre-commit]
       - id: check-yaml
+        stages: [pre-commit]
 
   - repo: local
     hooks:
@@ -13,6 +16,7 @@ repos:
         entry: uv run black
         language: system
         types: [python]
+        stages: [pre-commit]
 
       - id: pytest
         name: pytest-suite
@@ -20,6 +24,7 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+        stages: [pre-commit]
         env:
           PYTHONDONTWRITEBYTECODE: "1"
 
