@@ -532,25 +532,21 @@ class TestProteinGraphBuilder:
         Tests build_from_parsed_dict unpacks parsed dictionaries and builds PyG graph.
 
         Arrange:
-            Instantiate ProteinGraphBuilder, mock dictionary, site mapping, and feature arrays.
+            Instantiate ProteinGraphBuilder, mock dictionary with site mapping, and feature arrays.
         Act:
-            Call build_from_parsed_dict with site_mapping parameter.
+            Call build_from_parsed_dict using embedded dictionary keys and parameters.
         Assert:
             Verify returned object is a PyG Data tensor with expected dimensions and attached mapping.
         """
         # Arrange
         builder = ProteinGraphBuilder(distance_cutoff=10.0)
         parsed_dict = make_mock_parsed_dict(n_residues=5)
-        rsasa_np = np.array([0.5, 0.5, 0.5, 0.5, 0.5], dtype=np.float32)
-        anm_msf_np = np.array([0.2, 0.2, 0.2, 0.2, 0.2], dtype=np.float32)
         mock_site_mapping = {"655": {"res_num": 588, "is_anchor": True, "aa": "GLU"}}
+        parsed_dict["site_mapping"] = mock_site_mapping
 
         # Act
         graph = builder.build_from_parsed_dict(
             parsed_dict=parsed_dict,
-            rsasa_np=rsasa_np,
-            anm_msf_np=anm_msf_np,
-            site_mapping=mock_site_mapping,
             name="state_000",
         )
 
@@ -564,10 +560,10 @@ class TestProteinGraphBuilder:
 
     def test_build_from_parsed_dict_handles_none_anm(self) -> None:
         """
-        Ensures build_from_parsed_dict handles optional/None ANM MSF gracefully.
+        Ensures build_from_parsed_dict handles optional/missing ANM MSF gracefully.
 
         Arrange:
-            Instantiate builder and parsed dictionary with anm_msf_np set to None.
+            Instantiate builder and parsed dictionary with missing anm_msf key.
         Act:
             Construct graph via build_from_parsed_dict.
         Assert:
@@ -576,13 +572,11 @@ class TestProteinGraphBuilder:
         # Arrange
         builder = ProteinGraphBuilder(distance_cutoff=10.0)
         parsed_dict = make_mock_parsed_dict(n_residues=5)
-        rsasa_np = np.array([0.1, 0.2, 0.3, 0.4, 0.5], dtype=np.float32)
+        parsed_dict.pop("anm_msf", None)
 
         # Act
         graph = builder.build_from_parsed_dict(
             parsed_dict=parsed_dict,
-            rsasa_np=rsasa_np,
-            anm_msf_np=None,
             name="state_001",
         )
 

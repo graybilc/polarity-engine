@@ -20,7 +20,7 @@ def load_resolved_site_mapping(
     mapping_json_path: Union[str, Path],
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Parses sequence alignment JSON metadata (ADR-0004) to map target sites.
+    Parses sequence alignment JSON metadata (ADR-0005) to map target sites.
 
     Reads the JSON file produced by `align_cif_sequences.py` and maps each target
     phosphorylation site ID to either its true modeled residue index or the
@@ -414,42 +414,21 @@ class ProteinGraphBuilder:
     def build_from_parsed_dict(
         self,
         parsed_dict: dict[str, Any],
-        rsasa_np: np.ndarray,
+        rsasa_np: np.ndarray | None = None,
         anm_msf_np: np.ndarray | None = None,
-        site_mapping: dict = None,
+        site_mapping: dict | None = None,
         name: str = "",
     ) -> Data:
-        """Unpacks a parsed structure dictionary and delegates to build_graph.
+        """
+        Unpacks a parsed structure dictionary and delegates to build_graph.
 
-        Supports multi-chain unified outputs (from `StructureParser.parse`),
-        single-chain legacy dicts, and attaches optional site alignment metadata
-        (ADR-0004 fallback anchors) to the resulting PyG Data object.
-
-        Args:
-            parsed_dict (dict[str, Any]): Dictionary returned by `StructureParser.parse`
-                or `mutate_structure_dict` containing node features and coordinate arrays.
-            rsasa_np (np.ndarray): Relative SASA values array of shape (N,).
-            anm_msf_np (np.ndarray | None, optional): ANM Mean-Square Fluctuation values
-                array of shape (N,). If None, defaults to zeros inside `build_graph`.
-            site_mapping (dict[str, Any] | None, optional): Target site alignment mapping
-                dictionary loaded via `load_resolved_site_mapping` (ADR-0004). If provided,
-                it is assigned directly to `graph_data.site_mapping`. Defaults to None.
-            name (str, optional): Identifier for the structure (e.g., 'state_101').
-                Defaults to "".
-
-        Returns:
-            Data: PyTorch Geometric `Data` instance containing node features (`x`),
-            edge indices (`edge_index`), edge features (`edge_attr`), spatial positions (`pos`),
-            and attached metadata (`name`, `site_mapping`).
-
-        Raises:
-            KeyError: If required keys (`nodes`, `coords`, etc.) cannot be found in `parsed_dict`.
+        Pulls biophysical features (`rsasa`, `anm_msf`) and `site_mapping` directly
+        from `parsed_dict` if not explicitly passed.
         """
         # 1. Extract nodes metadata (chain_id, res_num, res_name)
         if "nodes" in parsed_dict:
             nodes = parsed_dict["nodes"]
         elif "aa_residues" in parsed_dict and "all_atom_keys" in parsed_dict:
-            # Fallback for single-chain legacy dicts: pull chain_id from first heavy atom
             chain_id = (
                 parsed_dict["all_atom_keys"][0][0]
                 if parsed_dict["all_atom_keys"]
@@ -494,7 +473,25 @@ class ProteinGraphBuilder:
         else:
             occupancies_np = np.ones(len(aa_list), dtype=np.float32)
 
-        # 6. Delegate directly to build_graph
+        # 6. Extract/Fallback for rSASA array
+        if rsasa_np is None:
+            if "rsasa" in parsed_dict:
+                rsasa_np = np.asarray(parsed_dict["rsasa"], dtype=np.float32)
+            else:
+                rsasa_np = np.zeros(len(aa_list), dtype=np.float32)
+
+        # 7. Extract/Fallback for ANM MSF array
+        if anm_msf_np is None:
+            if "anm_msf" in parsed_dict:
+                anm_msf_np = np.asarray(parsed_dict["anm_msf"], dtype=np.float32)
+            else:
+                anm_msf_np = np.zeros(len(aa_list), dtype=np.float32)
+
+        # 8. Extract site mapping if stored inside dictionary
+        if site_mapping is None and "site_mapping" in parsed_dict:
+            site_mapping = parsed_dict["site_mapping"]
+
+        # Delegate directly to build_graph
         graph_data = self.build_graph(
             aa_list=aa_list,
             coords_np=coords_np,
@@ -505,6 +502,8 @@ class ProteinGraphBuilder:
             anm_msf_np=anm_msf_np,
             name=name,
         )
+
         if site_mapping:
             graph_data.site_mapping = site_mapping
+
         return graph_data
