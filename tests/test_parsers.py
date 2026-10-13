@@ -576,3 +576,37 @@ class TestStructureParserInternalLogic:
         assert len(rsasa_vec) == 2
         assert rsasa_vec[0] == pytest.approx(expected_ala_rsasa, abs=1e-5)
         assert rsasa_vec[1] == 1.0  # Upper bound clamped to 1.0
+
+    def test_parse_cif_with_ref_cif_path_success(self, mock_cif_file, tmp_path: Path):
+        """
+        Arrange:
+            Prepare primary mock mmCIF and a secondary reference mmCIF on disk.
+        Act:
+            Invoke StructureParser.parse providing ref_cif_path.
+        Assert:
+            Verify parse executes successfully and returns expected full schema dictionary.
+        """
+        ref_cif_path = tmp_path / "structures" / "ref_structure.cif"
+        ref_cif_path.write_text(MOCK_CIF_CONTENT, encoding="utf-8")
+
+        parsed_output = StructureParser.parse(
+            file_path=mock_cif_file,
+            ref_cif_path=ref_cif_path,
+        )
+
+        expected_keys = {
+            "aa_list",
+            "coords",
+            "b_factors",
+            "occupancies",
+            "nodes",
+            "sasa_map",
+            "rsasa",
+            "anm_msf",
+            "all_atom_coords",
+            "all_atom_keys",
+            "all_atom_names",
+            "all_atom_res_names",
+        }
+        assert expected_keys.issubset(parsed_output.keys())
+        assert len(parsed_output["aa_list"]) > 0
