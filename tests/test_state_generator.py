@@ -13,7 +13,7 @@ from tests.mock_data import make_mock_parsed_dict
 class TestStateGenerator:
     """
     Test suite covering state mutation logic, array integrity,
-    and immutability contracts in state_generator.py.
+    custom mimic residues, and immutability contracts in state_generator.py.
     """
 
     def test_mutate_structure_dict_leaves_wt_unmodified(self) -> None:
@@ -87,6 +87,28 @@ class TestStateGenerator:
         assert "aa_list" in mutated_dict
         assert "coords" in mutated_dict
         assert "nodes" in mutated_dict
+
+    def test_mutate_structure_dict_custom_mimic_res(self) -> None:
+        """
+        Verifies that specifying mimic_res='ASP' correctly applies Aspartate substitutions
+        instead of the default Glutamate (GLU).
+
+        Arrange:
+            Instantiate WT mock dictionary and select full-mutation state code '111'.
+        Act:
+            Call mutate_structure_dict with mimic_res='ASP'.
+        Assert:
+            Verify that 'ASP' is present in the mutated sequence and 'GLU' is absent.
+        """
+        # Arrange
+        wt_dict = make_mock_parsed_dict(n_residues=5)
+
+        # Act
+        mutated_dict = mutate_structure_dict(wt_dict, state_code="111", mimic_res="ASP")
+
+        # Assert
+        assert "ASP" in mutated_dict["aa_list"]
+        assert "GLU" not in mutated_dict["aa_list"]
 
     def test_mutate_structure_dict_invalid_state_code_raises_error(self) -> None:
         """

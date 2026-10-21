@@ -1,5 +1,5 @@
 process MUTATE_STATE {
-    tag "Mutate State ${state_code}"
+    tag "Mutate State ${state_code} (${params.mimic_res})"
     label 'process_medium'
 
     publishDir "${params.outdir}/mutated_states", mode: 'copy', overwrite: true
@@ -15,7 +15,8 @@ process MUTATE_STATE {
     uv run python ${projectDir}/scripts/mutate_state.py \\
         --input "${wt_parsed_pt}" \\
         --state-code "${state_code}" \\
-        --out "mutated_${state_code}.pt"
+        --mimic-res "${params.mimic_res}" \\
+        --output "mutated_${state_code}.pt"
     """
 
     stub:

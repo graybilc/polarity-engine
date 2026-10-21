@@ -6,11 +6,13 @@ params.outdir    = "${projectDir}/output/module2"
 params.lgl_chain = 'L'
 params.cutoff    = 8.0
 params.sites     = '655,659,663'
+params.mimic_res = 'GLU'
 
 include { ALIGN_CIF         } from './processes/align_cif'
 include { PARSE_WT_CIF      } from './processes/parse_wt_cif'
 include { MUTATE_STATE      } from './processes/mutate_state'
 include { BUILD_STATE_GRAPH } from './processes/build_state_graph'
+include { RUN_KINETICS      } from './processes/run_kinetics'
 
 workflow {
     ch_state_codes = Channel.fromList([
@@ -36,10 +38,20 @@ workflow {
         ALIGN_CIF.out.site_mapping
     )
 
-    // 2. State Combinatorics
+    // 2. State Combinatorics (Passing mimic_res via config/params if referenced in process, or handled via script environment)
     ch_mutate_inputs = ch_state_codes.combine(PARSE_WT_CIF.out.wt_parsed)
     MUTATE_STATE(ch_mutate_inputs)
 
     // 3. Graph Tensor Assembly
     BUILD_STATE_GRAPH(MUTATE_STATE.out.mutated_dict)
+
+    // 4. Kinetic Simulation & rSASA Gating Solver
+    ch_all_graphs = BUILD_STATE_GRAPH.out.graph_pt
+        .map { state_code, graph_file -> graph_file }
+        .collect()
+
+    RUN_KINETICS(
+        ch_all_graphs,
+        ALIGN_CIF.out.site_mapping
+    )
 }

@@ -62,55 +62,34 @@ def resolve_state_mutations(
 
 
 def mutate_structure_dict(
-    wt_parsed_dict: dict[str, Any], state_code: str, target_chain: str = "B"
+    wt_parsed_dict: dict[str, Any],
+    state_code: str,
+    target_chain: str = "B",
+    mimic_res: str = "GLU",
 ) -> dict[str, Any]:
     """
     Applies phosphomimetic mutations to a wild-type parsed structure dictionary.
 
     Takes a parsed mmCIF dictionary structure—either flat or nested under a chain ID—
     and maps binary state permutation codes (e.g., '110') to specific amino acid
-    substitutions (e.g., SER -> GLU) at target phosphorylation sites.
+    substitutions (e.g., SER -> GLU or ASP) at target phosphorylation sites.
 
     Parameters
     ----------
     wt_parsed_dict : dict[str, Any]
         Wild-type parsed structural data dictionary containing core residue and
-        coordinate keys:
-        - 'nodes': List[Tuple[str, str, str]] of (chain_id, seq_num, 3_letter_code)
-        - 'aa_residues': List[Tuple[str, str]] of (seq_num, 3_letter_code) (optional,
-          inferred from 'nodes' if omitted)
-        - 'aa_list': List[str] of 3-letter residue names (optional)
-        Alternatively, data may be nested under `target_chain` key: `{target_chain: {...}}`.
+        coordinate keys.
     state_code : str
-        An N-bit binary string representation (e.g., '000', '110', '111') specifying
-        the target phosphorylation state across active target sites. Length must match
-        the number of target sites configured in `resolve_state_mutations`.
+        An N-bit binary string representation (e.g., '000', '110', '111').
     target_chain : str, default="B"
         The chain identifier to check for if `wt_parsed_dict` is chain-nested.
+    mimic_res : str, default="GLU"
+        3-letter amino acid code for the phosphomimetic substitution (e.g., "GLU" or "ASP").
 
     Returns
     -------
     dict[str, Any]
-        A deep copy of the original dictionary with updated residue identities in:
-        - `'aa_residues'`
-        - `'aa_list'` (if present)
-        - `'nodes'` (if present)
-        All spatial atomic coordinates and auxiliary values remain preserved.
-
-    Raises
-    ------
-    KeyError
-        If no valid structure dictionary is found, or if neither `'aa_residues'`
-        nor `'nodes'` exists in the resolved data dictionary.
-    ValueError
-        If `state_code` length does not match target sites or contains non-binary characters.
-
-    Examples
-    --------
-    >>> wt_dict = {'nodes': [('B', '655', 'SER'), ('B', '656', 'LEU')]}
-    >>> mutated = mutate_structure_dict(wt_dict, state_code='100')
-    >>> mutated['aa_residues'][0]
-    ('655', 'GLU')
+        A deep copy of the original dictionary with updated residue identities.
     """
     mutated_dict = copy.deepcopy(wt_parsed_dict)
 
@@ -141,8 +120,8 @@ def mutate_structure_dict(
             f"Neither 'aa_residues' nor 'nodes' found in structure dictionary."
         )
 
-    # 3. Resolve mutations
-    mutation_map = resolve_state_mutations(state_code)
+    # 3. Resolve mutations with customizable mimic residue support
+    mutation_map = resolve_state_mutations(state_code, mimic_res=mimic_res)
 
     # 4. Mutate aa_residues, aa_list, and nodes
     new_aa_residues = [
