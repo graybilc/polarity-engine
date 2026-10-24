@@ -147,31 +147,54 @@ class PhosphoKineticSolver:
         """
         s000, s100, s010, s001, s110, s101, s011, s111 = y
 
-        # Structural rSASA gating multipliers
-        m_100 = self._compute_rate_multiplier("000", "site_1")
-        m_010 = self._compute_rate_multiplier("000", "site_2")
-        m_001 = self._compute_rate_multiplier("000", "site_3")
+        # --- 1. rSASA Gating Multipliers (State-Specific Source Queries) ---
+        # Initial entry from S000
+        m_000_100 = self._compute_rate_multiplier("000", "site_1")
+        m_000_010 = self._compute_rate_multiplier("000", "site_2")
+        m_000_001 = self._compute_rate_multiplier("000", "site_3")
 
-        # Regime-dependent multipliers mapped by transition path
+        # Intermediate progression (querying the originating state's graph for the newly added site)
+        m_100_110 = self._compute_rate_multiplier(
+            "100", "site_2"
+        )  # S100 -> S110 adds site 2
+        m_001_101 = self._compute_rate_multiplier(
+            "001", "site_1"
+        )  # S001 -> S101 adds site 1
+        m_010_011 = self._compute_rate_multiplier(
+            "010", "site_3"
+        )  # S010 -> S011 adds site 3
+
+        # Final sink step to S111
+        m_110_111 = self._compute_rate_multiplier(
+            "110", "site_3"
+        )  # S110 -> S111 adds site 3
+        m_101_111 = self._compute_rate_multiplier(
+            "101", "site_2"
+        )  # S101 -> S111 adds site 2
+        m_011_111 = self._compute_rate_multiplier(
+            "011", "site_1"
+        )  # S011 -> S111 adds site 1
+
+        # --- 2. Regime-Dependent Topological Scalers ---
         sc_110 = self._get_regime_scaler("100", "110")
         sc_101 = self._get_regime_scaler("001", "101")
         sc_011 = self._get_regime_scaler("010", "011")
         sc_111 = self._get_regime_scaler("x", "111")
 
-        # Effective rates with multipliers applied
-        k_0_100 = self.base_rates["k_000_100"] * m_100
-        k_0_010 = self.base_rates["k_000_010"] * m_010
-        k_0_001 = self.base_rates["k_000_001"] * m_001
+        # --- 3. Effective Rates (Combining Base Rates, rSASA, and Regime Scalars) ---
+        k_0_100 = self.base_rates["k_000_100"] * m_000_100
+        k_0_010 = self.base_rates["k_000_010"] * m_000_010
+        k_0_001 = self.base_rates["k_000_001"] * m_000_001
 
-        k_100_110 = self.base_rates["k_100_110"] * sc_110
-        k_001_101 = self.base_rates["k_001_101"] * sc_101
-        k_010_011 = self.base_rates["k_010_011"] * sc_011
+        k_100_110 = self.base_rates["k_100_110"] * m_100_110 * sc_110
+        k_001_101 = self.base_rates["k_001_101"] * m_001_101 * sc_101
+        k_010_011 = self.base_rates["k_010_011"] * m_010_011 * sc_011
 
-        k_110_111 = self.base_rates["k_110_111"] * sc_111
-        k_101_111 = self.base_rates["k_101_111"] * sc_111
-        k_011_111 = self.base_rates["k_011_111"] * sc_111
+        k_110_111 = self.base_rates["k_110_111"] * m_110_111 * sc_111
+        k_101_111 = self.base_rates["k_101_111"] * m_101_111 * sc_111
+        k_011_111 = self.base_rates["k_011_111"] * m_011_111 * sc_111
 
-        # Mass-action differential equations across the 8-state hypercube
+        # --- 4. Mass-Action Differential Equations ---
         ds000_dt = -(k_0_100 + k_0_010 + k_0_001) * s000 + (
             self.base_rates["k_100_000"] * s100
             + self.base_rates["k_010_000"] * s010
@@ -186,7 +209,6 @@ class PhosphoKineticSolver:
         ds101_dt = (k_001_101 * s001) - (k_101_111 * s101)
         ds011_dt = (k_010_011 * s010) - (k_011_111 * s011)
 
-        # Fully phosphorylated sink state (S111)
         ds111_dt = (k_110_111 * s110) + (k_101_111 * s101) + (k_011_111 * s011)
 
         return [
