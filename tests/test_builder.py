@@ -585,3 +585,51 @@ class TestProteinGraphBuilder:
         assert graph.x.shape[0] == 5
         assert graph.x.shape[1] == 26
         assert not hasattr(graph, "site_mapping") or graph.site_mapping is None
+
+    def test_build_from_parsed_dict_recomputes_rsasa_for_mutants(self) -> None:
+        """
+        Tests that build_from_parsed_dict dynamically recalculates rSASA vectors
+        when residue identities are mutated (e.g. GLU vs ASP substitution).
+
+        Arrange:
+            Instantiate builder and create two parsed dict copies with differing mutation residue names
+            while sharing heavy atom coordinate structures.
+        Act:
+            Build graphs for both GLU and ASP mutant variants via build_from_parsed_dict.
+        Assert:
+            Verify that rSASA feature columns successfully reflect variant-specific normalization differences.
+        """
+        # Arrange
+        builder = ProteinGraphBuilder(distance_cutoff=10.0)
+
+        parsed_dict_glu = make_mock_parsed_dict(n_residues=4)
+        parsed_dict_asp = make_mock_parsed_dict(n_residues=4)
+
+        # Force distinct amino acid names at index 0 to simulate GLU vs ASP variant mutation
+        parsed_dict_glu["aa_list"][0] = "GLU"
+        parsed_dict_asp["aa_list"][0] = "ASP"
+        parsed_dict_glu["all_atom_res_names"] = [
+            "GLU" if res == "SER" else res
+            for res in parsed_dict_glu["all_atom_res_names"]
+        ]
+        parsed_dict_asp["all_atom_res_names"] = [
+            "ASP" if res == "SER" else res
+            for res in parsed_dict_asp["all_atom_res_names"]
+        ]
+
+        # Act
+        graph_glu = builder.build_from_parsed_dict(
+            parsed_dict=parsed_dict_glu, name="state_glu"
+        )
+        graph_asp = builder.build_from_parsed_dict(
+            parsed_dict=parsed_dict_asp, name="state_asp"
+        )
+
+        # Assert
+        rsasa_glu = graph_glu.x[:, RSASA_COL]
+        rsasa_asp = graph_asp.x[:, RSASA_COL]
+
+        # MaxASA values differ between GLU (666 A²) and ASP (558 A²), so normalized rSASA must diverge
+        assert not torch.allclose(
+            rsasa_glu, rsasa_asp
+        ), "rSASA features failed to dynamically update between GLU and ASP variants!"

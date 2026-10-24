@@ -11,6 +11,7 @@ from torch_geometric.data import Data
 from typing import Any
 
 from polarity_engine.constants import AMINO_ACID_TO_INDEX
+from polarity_engine.parsers import StructureParser
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -475,7 +476,17 @@ class ProteinGraphBuilder:
 
         # 6. Extract/Fallback for rSASA array
         if rsasa_np is None:
-            if "rsasa" in parsed_dict:
+            # Check if all_atom arrays are available to recompute fresh rSASA for variants
+            if "all_atom_coords" in parsed_dict and "all_atom_res_names" in parsed_dict:
+                try:
+                    rsasa_np = StructureParser.extract_node_rsasa_vector(parsed_dict)
+                except Exception:
+                    # Fallback to stored rsasa if recomputation fails
+                    rsasa_np = np.asarray(
+                        parsed_dict.get("rsasa", np.zeros(len(aa_list))),
+                        dtype=np.float32,
+                    )
+            elif "rsasa" in parsed_dict:
                 rsasa_np = np.asarray(parsed_dict["rsasa"], dtype=np.float32)
             else:
                 rsasa_np = np.zeros(len(aa_list), dtype=np.float32)
