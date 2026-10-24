@@ -1,23 +1,26 @@
 process RUN_KINETICS {
-    tag "Running Kinetic Simulation (${params.mimic_res} - ${params.regime})"
+    tag "Running Kinetic Simulation (${mimic_res} - ${params.regime})"
     label 'process_medium'
 
-    publishDir "${params.outdir}", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/trajectories", mode: 'copy', overwrite: true
 
     input:
-    path graphs
+    val mimic_res
+    val regime
+    path graphs_dir
     path site_mapping
 
     output:
-    path "${params.output_csv}", emit: trajectories_csv
+    path "simulation_trajectories_${mimic_res.toLowerCase()}_${regime.toLowerCase()}.csv", emit: trajectories_csv
 
     script:
+    def output_filename = "simulation_trajectories_${mimic_res.toLowerCase()}_${regime.toLowerCase()}.csv"
     """
     python -m polarity_engine.cli simulate \\
-        --graphs_dir . \\
-        --mappings site_mapping.json \\
+        --graphs_dir "." \\
+        --mappings "${site_mapping}" \\
         --alpha 1.2 \\
-        --regime "${params.regime}" \\
-        --output "${params.output_csv}"
+        --regime "${regime}" \\
+        --output "${output_filename}"
     """
 }

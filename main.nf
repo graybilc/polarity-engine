@@ -54,6 +54,8 @@ workflow {
         .collect()
 
     RUN_KINETICS(
+        params.mimic_res,
+        params.regime,
         ch_all_graphs,
         ALIGN_CIF.out.site_mapping
     )
