@@ -1,12 +1,15 @@
-nextflow.enable.dsl = 2
+params.cif_file   = "${projectDir}/data/8r3y.cif"
+params.ref_cif    = "${projectDir}/data/8r3y.cif"
+params.lgl_chain  = 'L'
+params.cutoff     = 8.0
+params.sites      = '655,659,663'
+params.mimic_res  = 'GLU'
+params.regime     = 'processive'
 
-params.cif_file  = "${projectDir}/data/8r3y.cif"
-params.ref_cif   = "${projectDir}/data/8r3y.cif"
-params.outdir    = "${projectDir}/output/module2"
-params.lgl_chain = 'L'
-params.cutoff    = 8.0
-params.sites     = '655,659,663'
-params.mimic_res = 'GLU'
+// Standardized dynamic paths
+params.outdir     = "${projectDir}/output/module2_${params.mimic_res.toLowerCase()}_${params.regime}"
+params.graphs_dir = "${projectDir}/output/graphs_${params.mimic_res.toLowerCase()}"
+params.output_csv = "simulation_trajectories_${params.mimic_res.toLowerCase()}_${params.regime}.csv"
 
 include { ALIGN_CIF         } from './processes/align_cif'
 include { PARSE_WT_CIF      } from './processes/parse_wt_cif'

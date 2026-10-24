@@ -94,7 +94,7 @@ def main():
             regime=args.regime,
         )
 
-        t_eval, concentrations = solver.simulate(t_span=(0, 100))
+        t_eval, concentrations = solver.simulate(t_span=(0, 20))
 
         # Format trajectories into a DataFrame and export to CSV
         columns = ["t", "s000", "s100", "s010", "s001", "s110", "s101", "s011", "s111"]

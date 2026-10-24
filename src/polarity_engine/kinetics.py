@@ -52,6 +52,7 @@ class PhosphoKineticSolver:
         self.graphs = graphs
         self.site_mappings = site_mappings
         self.alpha = alpha
+        self.par6_active = par6_active  # Fixed: explicitly assigned instance attribute
         self.regime = regime.lower()
 
         if self.regime not in ["processive", "dissociative"]:
@@ -62,7 +63,7 @@ class PhosphoKineticSolver:
         # Graybill & Prehoda (2014) and Graybill et al. (2012).
         # Secluded entirely from Parker & McDonald (2025) test datasets.
 
-        k_cat_multiplier = 8.5 if par6_active else 1.0
+        k_cat_multiplier = 8.5 if self.par6_active else 1.0
 
         self.base_rates = {
             # Initial priming entry rates from unphosphorylated state (S000)
@@ -72,6 +73,7 @@ class PhosphoKineticSolver:
             # Downstream progression rates across intermediate states
             "k_100_110": 0.15 * k_cat_multiplier,
             "k_001_101": 0.20 * k_cat_multiplier,
+            "k_010_011": 0.18 * k_cat_multiplier,  # Explicitly added branch path rate
             "k_110_111": 0.25 * k_cat_multiplier,
             "k_101_111": 0.28 * k_cat_multiplier,
             "k_011_111": 0.30 * k_cat_multiplier,
@@ -108,22 +110,26 @@ class PhosphoKineticSolver:
         # Positive exponent: higher surface exposure accelerates phosphorylation
         return np.exp(self.alpha * r_sasa)
 
-    def _get_regime_scaler(self, transition_type: str) -> float:
+    def _get_regime_scaler(self, transition_from: str, transition_to: str) -> float:
         """
-        Applies topological scaling based on whether the system operates under
-        a processive hand-off or a dissociative step-by-step model.
+        Applies topological scaling based on the change in phosphorylation count
+        between adjacent states in the hypercube.
 
         Args:
-            transition_type (str): String descriptor of the state transition path.
+            transition_from (str): Binary state code of the originating state (e.g., '100').
+            transition_to (str): Binary state code of the destination state (e.g., '110').
 
         Returns:
-            float: Topological scaling factor (>1.0 for processive acceleration, <1.0 for dissociative penalty).
+            float: Topological scaling factor (>1.0 for processive acceleration,
+                   <1.0 for dissociative penalty, 1.0 otherwise).
         """
-        if self.regime == "processive":
-            if any(k in transition_type for k in ["110", "101", "011"]):
+        from_count = transition_from.count("1")
+        to_count = transition_to.count("1")
+
+        if to_count > from_count and from_count >= 1:
+            if self.regime == "processive":
                 return 2.5
-        elif self.regime == "dissociative":
-            if any(k in transition_type for k in ["110", "101", "011"]):
+            elif self.regime == "dissociative":
                 return 0.4
         return 1.0
 
@@ -146,11 +152,11 @@ class PhosphoKineticSolver:
         m_010 = self._compute_rate_multiplier("000", "site_2")
         m_001 = self._compute_rate_multiplier("000", "site_3")
 
-        # Regime-dependent multipliers
-        sc_110 = self._get_regime_scaler("100_110")
-        sc_101 = self._get_regime_scaler("001_101")
-        sc_011 = self._get_regime_scaler("010_011")
-        sc_111 = self._get_regime_scaler("x_111")
+        # Regime-dependent multipliers mapped by transition path
+        sc_110 = self._get_regime_scaler("100", "110")
+        sc_101 = self._get_regime_scaler("001", "101")
+        sc_011 = self._get_regime_scaler("010", "011")
+        sc_111 = self._get_regime_scaler("x", "111")
 
         # Effective rates with multipliers applied
         k_0_100 = self.base_rates["k_000_100"] * m_100
@@ -159,6 +165,7 @@ class PhosphoKineticSolver:
 
         k_100_110 = self.base_rates["k_100_110"] * sc_110
         k_001_101 = self.base_rates["k_001_101"] * sc_101
+        k_010_011 = self.base_rates["k_010_011"] * sc_011
 
         k_110_111 = self.base_rates["k_110_111"] * sc_111
         k_101_111 = self.base_rates["k_101_111"] * sc_111
@@ -172,12 +179,12 @@ class PhosphoKineticSolver:
         )
 
         ds100_dt = (k_0_100 * s000) - (self.base_rates["k_100_000"] + k_100_110) * s100
-        ds010_dt = (k_0_010 * s000) - (self.base_rates["k_010_000"]) * s010
+        ds010_dt = (k_0_010 * s000) - (self.base_rates["k_010_000"] + k_010_011) * s010
         ds001_dt = (k_0_001 * s000) - (self.base_rates["k_001_000"] + k_001_101) * s001
 
         ds110_dt = (k_100_110 * s100) - (k_110_111 * s110)
         ds101_dt = (k_001_101 * s001) - (k_101_111 * s101)
-        ds011_dt = 0.0  # Secondary branch path
+        ds011_dt = (k_010_011 * s010) - (k_011_111 * s011)
 
         # Fully phosphorylated sink state (S111)
         ds111_dt = (k_110_111 * s110) + (k_101_111 * s101) + (k_011_111 * s011)
