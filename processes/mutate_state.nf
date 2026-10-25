@@ -12,10 +12,10 @@ process MUTATE_STATE {
 
     script:
     """
-    uv run python ${projectDir}/scripts/mutate_state.py \\
-        --input "${wt_parsed_pt}" \\
-        --state-code "${state_code}" \\
-        --mimic-res "${params.mimic_res}" \\
+    uv run python ${projectDir}/scripts/mutate_state.py \
+        --input "${wt_parsed_pt}" \
+        --state-code "${state_code}" \
+        --mimic-res "${params.mimic_res}" \
         --output "mutated_${state_code}.pt"
     """
 

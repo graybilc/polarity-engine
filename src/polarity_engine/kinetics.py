@@ -43,7 +43,7 @@ class PhosphoKineticSolver:
             graphs (Dict[str, Any]): Structural PyG graph representations for each state.
             site_mappings (Dict[str, Any]): Abstract functional site slot definitions.
             alpha (float, optional): Sensitivity multiplier for rSASA gating. Defaults to 1.2.
-            par6_active (bool, optional): Whether aPKC-Par6 is active (applies catalytic multiplier). Defaults to True.
+            par6_active (bool, optional): Whether aPKC-Par6 is active. Defaults to True.
             regime (str, optional): Operating kinetic regime ('processive' or 'dissociative'). Defaults to "processive".
 
         Raises:
@@ -52,28 +52,27 @@ class PhosphoKineticSolver:
         self.graphs = graphs
         self.site_mappings = site_mappings
         self.alpha = alpha
-        self.par6_active = par6_active  # Fixed: explicitly assigned instance attribute
+        self.par6_active = par6_active
         self.regime = regime.lower()
-        print("[DEBUG] Sites content:", self.site_mappings.get("sites"), flush=True)
         if self.regime not in ["processive", "dissociative"]:
             raise ValueError("Regime must be either 'processive' or 'dissociative'.")
 
         # --- TIER 1 PARAMETERIZATION SET (ADR-0006 Compliant) ---
-        # Provenance: Fitted exclusively from historical bulk assay data in
-        # Graybill & Prehoda (2014) and Graybill et al. (2012).
-        # Secluded entirely from Parker & McDonald (2025) test datasets.
-
         k_cat_multiplier = 8.5 if self.par6_active else 1.0
 
         self.base_rates = {
             # Initial priming entry rates from unphosphorylated state (S000)
-            "k_000_100": 0.04 * k_cat_multiplier,  # Site 1 secondary entry
-            "k_000_010": 0.07 * k_cat_multiplier,  # Site 2 tertiary entry
-            "k_000_001": 0.22 * k_cat_multiplier,  # Site 3 primary preferential entry
+            # Site 1 secondary entry
+            "k_000_100": 0.04 * k_cat_multiplier,
+            # Site 2 tertiary entry
+            "k_000_010": 0.07 * k_cat_multiplier,
+            # Site 3 primary preferential entry
+            "k_000_001": 0.22 * k_cat_multiplier,
             # Downstream progression rates across intermediate states
             "k_100_110": 0.15 * k_cat_multiplier,
             "k_001_101": 0.20 * k_cat_multiplier,
-            "k_010_011": 0.18 * k_cat_multiplier,  # Explicitly added branch path rate
+            # Explicitly added branch path rate
+            "k_010_011": 0.18 * k_cat_multiplier,
             "k_110_111": 0.25 * k_cat_multiplier,
             "k_101_111": 0.28 * k_cat_multiplier,
             "k_011_111": 0.30 * k_cat_multiplier,
@@ -112,7 +111,6 @@ class PhosphoKineticSolver:
         res_key = None
         if functional_site_id.startswith("site_"):
             try:
-                # Extract index from 'site_1' -> 0, 'site_2' -> 1, etc.
                 idx = int(functional_site_id.split("_")[1]) - 1
                 if 0 <= idx < len(sorted_res_keys):
                     res_key = sorted_res_keys[idx]
@@ -124,7 +122,6 @@ class PhosphoKineticSolver:
             res_key = functional_site_id
 
         if res_key not in sites_dict:
-            print(f"[DEBUG] Missing site mapping for {functional_site_id}", flush=True)
             return 1.0
 
         site_info = sites_dict[res_key]
@@ -133,7 +130,8 @@ class PhosphoKineticSolver:
         if res_idx is None or res_idx >= graph.x.shape[0]:
             return 1.0
 
-        r_sasa = graph.x[res_idx, 22].item()
+        # Index 23 accounts for the 27-dimensional node feature tensor (22 one-hot + seq_pos + rSASA)
+        r_sasa = graph.x[res_idx, 23].item()
         mult = np.exp(self.alpha * r_sasa)
 
         return mult
@@ -176,32 +174,17 @@ class PhosphoKineticSolver:
         s000, s100, s010, s001, s110, s101, s011, s111 = y
 
         # --- 1. rSASA Gating Multipliers (State-Specific Source Queries) ---
-        # Initial entry from S000
         m_000_100 = self._compute_rate_multiplier("000", "site_1")
         m_000_010 = self._compute_rate_multiplier("000", "site_2")
         m_000_001 = self._compute_rate_multiplier("000", "site_3")
 
-        # Intermediate progression (querying the originating state's graph for the newly added site)
-        m_100_110 = self._compute_rate_multiplier(
-            "100", "site_2"
-        )  # S100 -> S110 adds site 2
-        m_001_101 = self._compute_rate_multiplier(
-            "001", "site_1"
-        )  # S001 -> S101 adds site 1
-        m_010_011 = self._compute_rate_multiplier(
-            "010", "site_3"
-        )  # S010 -> S011 adds site 3
+        m_100_110 = self._compute_rate_multiplier("100", "site_2")
+        m_001_101 = self._compute_rate_multiplier("001", "site_1")
+        m_010_011 = self._compute_rate_multiplier("010", "site_3")
 
-        # Final sink step to S111
-        m_110_111 = self._compute_rate_multiplier(
-            "110", "site_3"
-        )  # S110 -> S111 adds site 3
-        m_101_111 = self._compute_rate_multiplier(
-            "101", "site_2"
-        )  # S101 -> S111 adds site 2
-        m_011_111 = self._compute_rate_multiplier(
-            "011", "site_1"
-        )  # S011 -> S111 adds site 1
+        m_110_111 = self._compute_rate_multiplier("110", "site_3")
+        m_101_111 = self._compute_rate_multiplier("101", "site_2")
+        m_011_111 = self._compute_rate_multiplier("011", "site_1")
 
         # --- 2. Regime-Dependent Topological Scalers ---
         sc_110 = self._get_regime_scaler("100", "110")
@@ -209,7 +192,7 @@ class PhosphoKineticSolver:
         sc_011 = self._get_regime_scaler("010", "011")
         sc_111 = self._get_regime_scaler("x", "111")
 
-        # --- 3. Effective Rates (Combining Base Rates, rSASA, and Regime Scalars) ---
+        # --- 3. Effective Rates ---
         k_0_100 = self.base_rates["k_000_100"] * m_000_100
         k_0_010 = self.base_rates["k_000_010"] * m_000_010
         k_0_001 = self.base_rates["k_000_001"] * m_000_001
@@ -238,7 +221,6 @@ class PhosphoKineticSolver:
         ds011_dt = (k_010_011 * s010) - (k_011_111 * s011)
 
         ds111_dt = (k_110_111 * s110) + (k_101_111 * s101) + (k_011_111 * s011)
-        print(f"m_000_100 (Glu/Asp check): {m_000_100}", flush=True)
         return [
             ds000_dt,
             ds100_dt,
@@ -259,15 +241,11 @@ class PhosphoKineticSolver:
         Args:
             t_span (Tuple[float, float], optional): Integration time window (t_start, t_end). Defaults to (0, 100).
             y0 (Optional[list], optional): Initial state concentrations across the 8 states.
-                                            Defaults to fully unphosphorylated [1.0, 0, 0, 0, 0, 0, 0, 0].
 
         Returns:
-            Tuple[np.ndarray, np.ndarray]: A tuple containing:
-                - t evaluation time points array.
-                - y solution array of shape (8, len(t)) containing concentration trajectories.
+            Tuple[np.ndarray, np.ndarray]: A tuple containing evaluation time points and concentration trajectories.
         """
         if y0 is None:
-            # Start fully unphosphorylated (S000)
             y0 = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
         solution = solve_ivp(

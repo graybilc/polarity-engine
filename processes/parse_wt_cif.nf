@@ -14,11 +14,11 @@ process PARSE_WT_CIF {
 
     script:
     """
-    uv run python ${projectDir}/scripts/parse_wt_cif.py \\
-        --cif "target.cif" \\
-        --ref-cif "reference.cif" \\
-        --mapping "${site_mapping}" \\
-        --chain "${params.lgl_chain}" \\
+    uv run python ${projectDir}/scripts/parse_wt_cif.py \
+        --cif "target.cif" \
+        --ref-cif "reference.cif" \
+        --mapping "${site_mapping}" \
+        --chain "${params.lgl_chain}" \
         --out "wt_parsed.pt"
     """
 

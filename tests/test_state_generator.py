@@ -1,12 +1,12 @@
 """
-Unit tests for phosphomimetic state mutation logic in state_generator.py.
+Unit tests for phosphomimetic and native state mutation logic in state_generator.py.
 """
 
 import copy
 import numpy as np
 import pytest
 
-from polarity_engine.state_generator import mutate_structure_dict
+from polarity_engine.state_generator import mutate_structure_dict, mutate_sep_to_ser
 from tests.mock_data import make_mock_parsed_dict
 
 
@@ -126,3 +126,42 @@ class TestStateGenerator:
         # Act & Assert
         with pytest.raises(ValueError):
             mutate_structure_dict(wt_dict, state_code=invalid_code)
+
+    def test_mutate_sep_to_ser_converts_residue_and_strips_phosphate(self) -> None:
+        """
+        Verifies that mutate_sep_to_ser correctly converts SEP to SER and strips phosphate atoms.
+
+        Arrange:
+            Construct a mock parsed dictionary containing a SEP residue with heavy atoms including 'P'.
+        Act:
+            Invoke mutate_sep_to_ser targeting the SEP residue.
+        Assert:
+            Verify SEP is replaced by SER in metadata and heavy-atom arrays, and phosphate atoms are removed.
+        """
+        # Arrange
+        parsed_dict = make_mock_parsed_dict(n_residues=3)
+        # Inject SEP at residue "663"
+        parsed_dict["aa_residues"][2] = ("663", "SEP")
+        parsed_dict["aa_list"][2] = "SEP"
+        parsed_dict["nodes"][2] = ("B", "663", "SEP")
+
+        # Add mock heavy atoms for SEP including phosphate 'P'
+        parsed_dict["all_atom_keys"] = [
+            ("B", "655"),
+            ("B", "655"),
+            ("B", "663"),
+            ("B", "663"),
+            ("B", "663"),
+        ]
+        parsed_dict["all_atom_names"] = ["N", "CA", "CB", "OG", "P"]
+        parsed_dict["all_atom_res_names"] = ["SER", "SER", "SEP", "SEP", "SEP"]
+        parsed_dict["all_atom_coords"] = np.zeros((5, 3), dtype=np.float64)
+
+        # Act
+        mutated_dict = mutate_sep_to_ser(parsed_dict, target_res_num="663")
+
+        # Assert
+        assert "SEP" not in mutated_dict["aa_list"]
+        assert mutated_dict["aa_list"][2] == "SER"
+        assert "P" not in mutated_dict["all_atom_names"]
+        assert all(res == "SER" for res in mutated_dict["all_atom_res_names"])

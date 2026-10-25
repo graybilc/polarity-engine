@@ -7,6 +7,7 @@ the output of parsers.py _parse_mmcif_fast_path.
 
 from typing import Any
 import copy
+import numpy as np
 import torch
 
 # Default target positions for Lgl1 / 8r3y
@@ -38,12 +39,6 @@ def resolve_state_mutations(
     -------
     dict[str, str]
         Dictionary mapping target residue numbers to their substituted residue name.
-        Example for state_code '101': {'655': 'GLU', '663': 'GLU'}
-
-    Raises
-    ------
-    ValueError
-        If `state_code` length does not match the number of target sites or contains non-binary characters.
     """
     targets = target_sites if target_sites is not None else DEFAULT_APKC_TARGETS
 
@@ -61,6 +56,107 @@ def resolve_state_mutations(
     return mutations
 
 
+def mutate_sep_to_ser(
+    parsed_dict: dict[str, Any], target_res_num: str = "663", target_chain: str = "B"
+) -> dict[str, Any]:
+    """
+    Mutates a native phosphoserine (SEP) residue back to serine (SER) by
+    updating residue labels and stripping phosphate heavy atoms (P, O1P, O2P, O3P).
+
+    Args:
+        parsed_dict : dict[str, Any]
+            Parsed structural data dictionary containing SEP at the target residue.
+        target_res_num : str, default="663"
+            Residue number to mutate from SEP to SER.
+        target_chain : str, default="B"
+            Chain identifier.
+
+    Returns:
+        dict[str, Any]
+            A deep copy of the dictionary with SEP converted to SER.
+    """
+    mutated_dict = copy.deepcopy(parsed_dict)
+
+    # 1. Locate data dictionary
+    data_dict = None
+    if any(
+        k in mutated_dict
+        for k in ("nodes", "aa_residues", "aa_list", "all_atom_coords")
+    ):
+        data_dict = mutated_dict
+    elif target_chain in mutated_dict and isinstance(mutated_dict[target_chain], dict):
+        data_dict = mutated_dict[target_chain]
+    else:
+        for v in mutated_dict.values():
+            if isinstance(v, dict) and any(
+                rk in v for rk in ("nodes", "aa_residues", "aa_list")
+            ):
+                data_dict = v
+                break
+
+    if data_dict is None:
+        raise KeyError("Could not find valid structure keys in dictionary.")
+
+    # 2. Update C-alpha / backbone residue lists
+    if "aa_residues" in data_dict:
+        data_dict["aa_residues"] = [
+            (seq_num, "SER" if seq_num == target_res_num and res == "SEP" else res)
+            for seq_num, res in data_dict["aa_residues"]
+        ]
+
+    if "aa_list" in data_dict and "aa_residues" in data_dict:
+        data_dict["aa_list"] = [res for _, res in data_dict["aa_residues"]]
+
+    if "nodes" in data_dict:
+        data_dict["nodes"] = [
+            (
+                chain_id,
+                seq_num,
+                "SER" if seq_num == target_res_num and res == "SEP" else res,
+            )
+            for chain_id, seq_num, res in data_dict["nodes"]
+        ]
+
+    # 3. Filter all-atom arrays: change SEP -> SER and remove phosphate atoms
+    if "all_atom_coords" in data_dict and "all_atom_keys" in data_dict:
+        standard_ser_atoms = {"N", "CA", "C", "O", "CB", "OG"}
+
+        new_coords = []
+        new_keys = []
+        new_names = []
+        new_res_names = []
+
+        for coord, key, atom_name, res_name in zip(
+            data_dict["all_atom_coords"],
+            data_dict["all_atom_keys"],
+            data_dict["all_atom_names"],
+            data_dict["all_atom_res_names"],
+        ):
+            _, seq_num = key
+            clean_atom = atom_name.upper().strip()
+
+            if seq_num == target_res_num and res_name in ("SEP", "SER"):
+                if clean_atom in standard_ser_atoms:
+                    new_coords.append(coord)
+                    new_keys.append(key)
+                    new_names.append(clean_atom)
+                    new_res_names.append("SER")
+            else:
+                new_coords.append(coord)
+                new_keys.append(key)
+                new_names.append(atom_name)
+                new_res_names.append(res_name)
+
+        data_dict["all_atom_coords"] = np.array(
+            new_coords, dtype=data_dict["all_atom_coords"].dtype
+        )
+        data_dict["all_atom_keys"] = new_keys
+        data_dict["all_atom_names"] = new_names
+        data_dict["all_atom_res_names"] = new_res_names
+
+    return mutated_dict
+
+
 def mutate_structure_dict(
     wt_parsed_dict: dict[str, Any],
     state_code: str,
@@ -69,27 +165,6 @@ def mutate_structure_dict(
 ) -> dict[str, Any]:
     """
     Applies phosphomimetic mutations to a wild-type parsed structure dictionary.
-
-    Takes a parsed mmCIF dictionary structure—either flat or nested under a chain ID—
-    and maps binary state permutation codes (e.g., '110') to specific amino acid
-    substitutions (e.g., SER -> GLU or ASP) at target phosphorylation sites.
-
-    Parameters
-    ----------
-    wt_parsed_dict : dict[str, Any]
-        Wild-type parsed structural data dictionary containing core residue and
-        coordinate keys.
-    state_code : str
-        An N-bit binary string representation (e.g., '000', '110', '111').
-    target_chain : str, default="B"
-        The chain identifier to check for if `wt_parsed_dict` is chain-nested.
-    mimic_res : str, default="GLU"
-        3-letter amino acid code for the phosphomimetic substitution (e.g., "GLU" or "ASP").
-
-    Returns
-    -------
-    dict[str, Any]
-        A deep copy of the original dictionary with updated residue identities.
     """
     mutated_dict = copy.deepcopy(wt_parsed_dict)
 

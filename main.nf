@@ -33,18 +33,19 @@ workflow {
         params.lgl_chain
     )
 
-    // 1. Parse Target CIF and Impute Missing Loops
+    // 1. Parse Target CIF (Capturing native SEP at 663 from 8r3y) and Impute Missing Loops
     PARSE_WT_CIF(
         ch_cif_file,
         ch_ref_cif,
         ALIGN_CIF.out.site_mapping
     )
 
-    // 2. State Combinatorics (Passing mimic_res via config/params if referenced in process, or handled via script environment)
+    // 2. State Combinatorics
+    // (States with '0' at site 663 will mutate SEP -> SER; states with '1' retain native SEP or apply mimic_res)
     ch_mutate_inputs = ch_state_codes.combine(PARSE_WT_CIF.out.wt_parsed)
     MUTATE_STATE(ch_mutate_inputs)
 
-    // 3. Graph Tensor Assembly
+    // 3. Graph Tensor Assembly (Outputs 27-channel node feature tensors including SEP/SER and rSASA)
     BUILD_STATE_GRAPH(MUTATE_STATE.out.mutated_dict)
 
     // 4. Kinetic Simulation & rSASA Gating Solver
