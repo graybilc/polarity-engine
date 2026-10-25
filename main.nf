@@ -7,7 +7,6 @@ params.mimic_res  = 'GLU'
 params.regime     = 'processive'
 
 // Standardized dynamic paths
-params.outdir     = "${projectDir}/output/module2_${params.mimic_res.toLowerCase()}_${params.regime}"
 params.graphs_dir = "${projectDir}/output/graphs_${params.mimic_res.toLowerCase()}"
 params.output_csv = "simulation_trajectories_${params.mimic_res.toLowerCase()}_${params.regime}.csv"
 

@@ -54,7 +54,7 @@ class PhosphoKineticSolver:
         self.alpha = alpha
         self.par6_active = par6_active  # Fixed: explicitly assigned instance attribute
         self.regime = regime.lower()
-
+        print("[DEBUG] Sites content:", self.site_mappings.get("sites"), flush=True)
         if self.regime not in ["processive", "dissociative"]:
             raise ValueError("Regime must be either 'processive' or 'dissociative'.")
 
@@ -100,15 +100,43 @@ class PhosphoKineticSolver:
                    Returns 1.0 if the graph or site mapping is missing.
         """
         graph = self.graphs.get(state_code)
-        if graph is None or functional_site_id not in self.site_mappings:
+        sites_dict = self.site_mappings.get("sites", {})
+
+        if graph is None or not sites_dict:
             return 1.0
 
-        res_idx = self.site_mappings[functional_site_id]["res_num"]
-        # Node feature index 22: rSASA (0.0 to 1.0)
-        r_sasa = graph.x[res_idx, 22].item()
+        # Dynamically sort residue keys from the JSON (e.g., ['655', '659', '663'])
+        sorted_res_keys = sorted(sites_dict.keys(), key=int)
 
-        # Positive exponent: higher surface exposure accelerates phosphorylation
-        return np.exp(self.alpha * r_sasa)
+        # Map abstract names ('site_1', 'site_2', 'site_3') to sorted positions dynamically
+        res_key = None
+        if functional_site_id.startswith("site_"):
+            try:
+                # Extract index from 'site_1' -> 0, 'site_2' -> 1, etc.
+                idx = int(functional_site_id.split("_")[1]) - 1
+                if 0 <= idx < len(sorted_res_keys):
+                    res_key = sorted_res_keys[idx]
+            except (ValueError, IndexError):
+                pass
+
+        # Fallback if a raw residue key was passed directly
+        if not res_key or res_key not in sites_dict:
+            res_key = functional_site_id
+
+        if res_key not in sites_dict:
+            print(f"[DEBUG] Missing site mapping for {functional_site_id}", flush=True)
+            return 1.0
+
+        site_info = sites_dict[res_key]
+        res_idx = site_info.get("target_res_num")
+
+        if res_idx is None or res_idx >= graph.x.shape[0]:
+            return 1.0
+
+        r_sasa = graph.x[res_idx, 22].item()
+        mult = np.exp(self.alpha * r_sasa)
+
+        return mult
 
     def _get_regime_scaler(self, transition_from: str, transition_to: str) -> float:
         """
@@ -210,7 +238,7 @@ class PhosphoKineticSolver:
         ds011_dt = (k_010_011 * s010) - (k_011_111 * s011)
 
         ds111_dt = (k_110_111 * s110) + (k_101_111 * s101) + (k_011_111 * s011)
-
+        print(f"m_000_100 (Glu/Asp check): {m_000_100}", flush=True)
         return [
             ds000_dt,
             ds100_dt,
