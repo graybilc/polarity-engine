@@ -2,7 +2,7 @@
 """
 polarity_engine/state_generator.py
 Generates mutated 8-state structural representations directly from
-the output of parsers.py _parse_mmcif_fast_path.
+the output of parsers.py _parse_mmcif_fast_path. AAA
 """
 
 from typing import Any
@@ -24,21 +24,16 @@ def resolve_state_mutations(
     """
     Maps a binary state code to residue mutation substitutions using bit index targets.
 
-    Parameters
-    ----------
-    state_code : str
-        Binary string representation (e.g. '100', '110', '111').
-        '1' indicates phosphomimetic mutation; '0' indicates wild-type residue.
-    target_sites : dict[int, str] | None, optional
-        Mapping of bit positions to residue numbers.
-        Defaults to `DEFAULT_APKC_TARGETS` ({0: "655", 1: "659", 2: "663"}).
-    mimic_res : str, default="GLU"
-        3-letter amino acid code for the phosphomimetic substitution.
+    Args:
+        state_code (str): Binary string representation (e.g. '100', '110', '111').
+            '1' indicates phosphomimetic mutation; '0' indicates wild-type residue.
+        target_sites (dict[int, str] | None, optional): Mapping of bit positions to residue numbers.
+            Defaults to `DEFAULT_APKC_TARGETS` ({0: "655", 1: "659", 2: "663"}).
+        mimic_res (str, optional): 3-letter amino acid code for the phosphomimetic substitution.
+            Defaults to "GLU".
 
-    Returns
-    -------
-    dict[str, str]
-        Dictionary mapping target residue numbers to their substituted residue name.
+    Returns:
+        dict[str, str]: Dictionary mapping target residue numbers to their substituted residue name.
     """
     targets = target_sites if target_sites is not None else DEFAULT_APKC_TARGETS
 
@@ -64,16 +59,12 @@ def mutate_sep_to_ser(
     updating residue labels and stripping phosphate heavy atoms (P, O1P, O2P, O3P).
 
     Args:
-        parsed_dict : dict[str, Any]
-            Parsed structural data dictionary containing SEP at the target residue.
-        target_res_num : str, default="663"
-            Residue number to mutate from SEP to SER.
-        target_chain : str, default="B"
-            Chain identifier.
+        parsed_dict (dict[str, Any]): Parsed structural data dictionary containing SEP at the target residue.
+        target_res_num (str, optional): Residue number to mutate from SEP to SER. Defaults to "663".
+        target_chain (str, optional): Chain identifier. Defaults to "B".
 
     Returns:
-        dict[str, Any]
-            A deep copy of the dictionary with SEP converted to SER.
+        dict[str, Any]: A deep copy of the dictionary with SEP converted to SER.
     """
     mutated_dict = copy.deepcopy(parsed_dict)
 
@@ -164,7 +155,17 @@ def mutate_structure_dict(
     mimic_res: str = "GLU",
 ) -> dict[str, Any]:
     """
-    Applies phosphomimetic mutations to a wild-type parsed structure dictionary.
+    Applies phosphomimetic mutations to a wild-type parsed structure dictionary,
+    updating both metadata labels and heavy-atom side-chain coordinates for GLU/ASP.
+
+    Args:
+        wt_parsed_dict (dict[str, Any]): Wild-type parsed structure dictionary.
+        state_code (str): Binary state permutation code (e.g., '100', '110', '111').
+        target_chain (str, optional): Target chain identifier. Defaults to "B".
+        mimic_res (str, optional): 3-letter code for the phosphomimetic residue ('GLU' or 'ASP'). Defaults to "GLU".
+
+    Returns:
+        dict[str, Any]: Mutated structure dictionary containing updated node features and expanded heavy-atom coordinates.
     """
     mutated_dict = copy.deepcopy(wt_parsed_dict)
 
@@ -213,13 +214,90 @@ def mutate_structure_dict(
             for chain_id, seq_num, res in data_dict["nodes"]
         ]
 
-    # 5. Mutate heavy-atom residue labels if present
+    # 5. Mutate heavy-atom residue labels and expand side-chain heavy atoms for GLU/ASP
     if "all_atom_res_names" in data_dict and "all_atom_keys" in data_dict:
-        data_dict["all_atom_res_names"] = [
-            mutation_map.get(seq_num, orig_res)
-            for (chain_id, seq_num), orig_res in zip(
-                data_dict["all_atom_keys"], data_dict["all_atom_res_names"]
-            )
-        ]
+        new_coords = []
+        new_keys = []
+        new_names = []
+        new_res_names = []
+
+        expanded_residues = set()
+
+        for coord, key, atom_name, res_name in zip(
+            data_dict["all_atom_coords"],
+            data_dict["all_atom_keys"],
+            data_dict["all_atom_names"],
+            data_dict["all_atom_res_names"],
+        ):
+            chain_id, seq_num = key
+            target_mimic = mutation_map.get(seq_num)
+            clean_atom = atom_name.upper().strip()
+
+            if target_mimic in ("GLU", "ASP"):
+                if clean_atom in ("N", "CA", "C", "O", "CB"):
+                    new_coords.append(coord)
+                    new_keys.append(key)
+                    new_names.append(clean_atom)
+                    new_res_names.append(target_mimic)
+                elif clean_atom == "OG":
+                    if seq_num not in expanded_residues:
+                        cb_coord = next(
+                            (
+                                c
+                                for c, k, n in zip(new_coords, new_keys, new_names)
+                                if k == key and n == "CB"
+                            ),
+                            coord,
+                        )
+                        cg_coord = cb_coord + np.array([1.2, 0.5, 0.0])
+
+                        if target_mimic == "GLU":
+                            cd_coord = cg_coord + np.array([1.2, 0.4, 0.0])
+                            oe1_coord = cd_coord + np.array([0.8, 0.6, 0.0])
+                            oe2_coord = cd_coord + np.array([0.5, -0.7, 0.0])
+
+                            for aname, acoord in [
+                                ("CG", cg_coord),
+                                ("CD", cd_coord),
+                                ("OE1", oe1_coord),
+                                ("OE2", oe2_coord),
+                            ]:
+                                new_coords.append(acoord)
+                                new_keys.append(key)
+                                new_names.append(aname)
+                                new_res_names.append("GLU")
+                        else:  # ASP
+                            od1_coord = cg_coord + np.array([0.8, 0.5, 0.0])
+                            od2_coord = cg_coord + np.array([0.4, -0.8, 0.0])
+
+                            for aname, acoord in [
+                                ("CG", cg_coord),
+                                ("OD1", od1_coord),
+                                ("OD2", od2_coord),
+                            ]:
+                                new_coords.append(acoord)
+                                new_keys.append(key)
+                                new_names.append(aname)
+                                new_res_names.append("ASP")
+
+                        expanded_residues.add(seq_num)
+                else:
+                    if clean_atom not in ("P", "O1P", "O2P", "O3P"):
+                        new_coords.append(coord)
+                        new_keys.append(key)
+                        new_names.append(clean_atom)
+                        new_res_names.append(target_mimic)
+            else:
+                new_coords.append(coord)
+                new_keys.append(key)
+                new_names.append(atom_name)
+                new_res_names.append(res_name)
+
+        data_dict["all_atom_coords"] = np.array(
+            new_coords, dtype=data_dict["all_atom_coords"].dtype
+        )
+        data_dict["all_atom_keys"] = new_keys
+        data_dict["all_atom_names"] = new_names
+        data_dict["all_atom_res_names"] = new_res_names
 
     return mutated_dict
