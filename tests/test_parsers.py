@@ -492,6 +492,62 @@ class TestStructureParserInternalLogic:
         assert result["aa_residues"] == [("1", "SER"), ("2", "ALA")]
         assert result["all_atom_coords"].shape == (3, 3)
 
+    def test_parse_mmcif_fast_path_includes_sep_hetatm(self):
+        """
+        Arrange:
+            Construct raw in-memory mmCIF dictionary containing HETATM SEP records (such as residue 663).
+        Act:
+            Invoke private helper StructureParser._parse_mmcif_fast_path.
+        Assert:
+            Verify HETATM SEP is correctly included in parsed residues and heavy-atom arrays.
+        """
+        mock_mmcif_dict = {
+            "_atom_site.label_atom_id": ["CA", "N", "CA", "CB", "OG", "P"],
+            "_atom_site.auth_asym_id": ["B", "B", "B", "B", "B", "B"],
+            "_atom_site.group_PDB": [
+                "ATOM",
+                "HETATM",
+                "HETATM",
+                "HETATM",
+                "HETATM",
+                "HETATM",
+            ],
+            "_atom_site.Cartn_x": ["97.0", "97.4", "98.9", "99.5", "98.6", "98.8"],
+            "_atom_site.Cartn_y": [
+                "101.0",
+                "101.8",
+                "101.6",
+                "102.9",
+                "103.6",
+                "105.2",
+            ],
+            "_atom_site.Cartn_z": [
+                "113.0",
+                "113.2",
+                "112.8",
+                "112.4",
+                "111.5",
+                "111.2",
+            ],
+            "_atom_site.auth_comp_id": ["SER", "SEP", "SEP", "SEP", "SEP", "SEP"],
+            "_atom_site.auth_seq_id": ["655", "663", "663", "663", "663", "663"],
+            "_atom_site.B_iso_or_equiv": [
+                "63.7",
+                "63.7",
+                "63.7",
+                "63.7",
+                "63.7",
+                "63.7",
+            ],
+            "_atom_site.occupancy": ["1.0", "1.0", "1.0", "1.0", "1.0", "1.0"],
+        }
+
+        result = StructureParser._parse_mmcif_fast_path(mock_mmcif_dict, "B")
+
+        assert result["ca_coords"].shape == (2, 3)  # SER 655 CA and SEP 663 CA
+        assert any(res_name == "SEP" for _, res_name in result["aa_residues"])
+        assert "SEP" in result["all_atom_res_names"]
+
     def test_load_and_inspect_multi_model_pdb_warning(self, caplog):
         """
         Arrange:

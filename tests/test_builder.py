@@ -8,6 +8,7 @@ from pathlib import Path
 from torch_geometric.data import Data
 
 from polarity_engine.builder import ProteinGraphBuilder, load_resolved_site_mapping
+from polarity_engine.constants import AMINO_ACID_TO_INDEX
 from tests.mock_data import (
     MOCK_NODES,
     MOCK_AA_LIST,
@@ -23,11 +24,15 @@ from tests.mock_data import (
     make_mock_parsed_dict,
 )
 
-SEQ_POS_COL = 21
-RSASA_COL = 22
-B_FACTOR_COL = 23
-OCCUPANCY_COL = 24
-ANM_MSF_COL = 25
+SEQ_POS_COL = 22
+RSASA_COL = 23
+B_FACTOR_COL = 24
+OCCUPANCY_COL = 25
+ANM_MSF_COL = 26
+
+EXPECTED_FEATURE_DIM = (
+    len(AMINO_ACID_TO_INDEX) + 5
+)  # 1 seq_pos + 4 biophysical features
 
 
 @pytest.fixture
@@ -187,7 +192,7 @@ class TestProteinGraphBuilder:
         E = data.edge_index.shape[1]
 
         # Node Features: (N, 25) -> 21 one-hot + 1 seq_pos + 1 rSASA + 1 B-factor + 1 occupancy + anm_msf
-        assert data.x.shape == (N, 26)
+        assert data.x.shape == (N, EXPECTED_FEATURE_DIM)
         assert data.x.dtype == torch.float32
 
         # Verify rSASA, B-factors, and Occupancies in node feature tensor slices
@@ -236,7 +241,7 @@ class TestProteinGraphBuilder:
         )
 
         # 1. Verify tensor shapes
-        assert data.x.shape == (1, 26)
+        assert data.x.shape == (1, EXPECTED_FEATURE_DIM)
         assert data.edge_index.shape == (2, 0)
         assert data.edge_attr.shape == (0, 20)
 
@@ -444,7 +449,7 @@ class TestProteinGraphBuilder:
             name="mock_complex",
         )
 
-        assert data.x.shape == (4, 26)
+        assert data.x.shape == (4, EXPECTED_FEATURE_DIM)
         rsasa_column = data.x[:, RSASA_COL]
         assert torch.allclose(rsasa_column, torch.from_numpy(MOCK_RSASA_NP).float())
 
@@ -455,7 +460,7 @@ class TestProteinGraphBuilder:
         Act:
             Build graph without passing anm_msf_np parameter (defaulting to None).
         Assert:
-            Verify node features tensor shape is (N, 26) and ANM MSF channel contains zeros.
+            Verify node features tensor shape is (N, EXPECTED_FEATURE_DIM) and ANM MSF channel contains zeros.
         """
         aa_list, coords, b_factors, occupancies, nodes, rsasa, _, name = (
             dummy_5_residue_protein
@@ -470,7 +475,7 @@ class TestProteinGraphBuilder:
             name=name,
         )
 
-        assert data.x.shape == (len(aa_list), 26)
+        assert data.x.shape == (len(aa_list), EXPECTED_FEATURE_DIM)
         assert torch.allclose(
             data.x[:, ANM_MSF_COL], torch.zeros(len(aa_list), dtype=torch.float32)
         )
@@ -553,7 +558,7 @@ class TestProteinGraphBuilder:
         # Assert
         assert isinstance(graph, Data)
         assert graph.x.shape[0] == 5  # 5 nodes
-        assert graph.x.shape[1] == 26  # 26 node feature channels
+        assert graph.x.shape[1] == EXPECTED_FEATURE_DIM
         assert graph.name == "state_000"
         assert hasattr(graph, "site_mapping")
         assert graph.site_mapping == mock_site_mapping
@@ -583,7 +588,7 @@ class TestProteinGraphBuilder:
         # Assert
         assert isinstance(graph, Data)
         assert graph.x.shape[0] == 5
-        assert graph.x.shape[1] == 26
+        assert graph.x.shape[1] == EXPECTED_FEATURE_DIM
         assert not hasattr(graph, "site_mapping") or graph.site_mapping is None
 
     def test_build_from_parsed_dict_recomputes_rsasa_for_mutants(self) -> None:

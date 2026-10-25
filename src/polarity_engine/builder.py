@@ -177,7 +177,7 @@ class ProteinGraphBuilder:
         )
 
         # One-hot encode to float32 tensor (N, 21)
-        x_one_hot = torch.nn.functional.one_hot(aa_indices, num_classes=21).float()
+        x_one_hot = torch.nn.functional.one_hot(aa_indices, num_classes=22).float()
 
         # Create normalized sequence positions in range [0, 1]
         seq_pos = torch.arange(len(aa_list), dtype=torch.float32) / max(

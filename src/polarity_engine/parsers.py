@@ -315,12 +315,21 @@ class StructureParser:
         )
 
         for residue in chain:
-            # Skip heterogens/water (residue.id[0] != ' ')
-            if residue.id[0] != " ":
+            hetflag = residue.id[0]
+            res_name_str = residue.get_resname().strip()
+
+            # Allow standard residues (" ") or modified phosphoresidues ("H_SEP", etc.)
+            is_standard = hetflag == " "
+            is_allowed_het = hetflag.startswith("H_") and res_name_str in {
+                "SEP",
+                "TPO",
+                "PTR",
+            }
+
+            if not is_standard and not is_allowed_het:
                 continue
 
             res_num_str = str(residue.id[1])
-            res_name_str = residue.get_resname().strip()
 
             for atom in residue:
                 clean_atom_name = atom.get_name().strip()
@@ -332,18 +341,14 @@ class StructureParser:
                 ):
                     continue
 
-                # Resolve disordered point mutations / alternate conformations
                 target_atom = atom.selected_child if atom.is_disordered() else atom
-
                 coord = target_atom.get_coord()
 
-                # 1. Accumulate all heavy atoms
                 all_atom_coords.append(coord)
                 all_atom_keys.append((chain_id, res_num_str))
                 all_atom_names.append(clean_atom_name)
                 all_atom_res_names.append(res_name_str)
 
-                # 2. Extract C-alpha backbone nodes
                 if clean_atom_name == "CA":
                     ca_coordinates.append(coord)
                     aa_residues.append((res_num_str, res_name_str))
@@ -470,39 +475,46 @@ class StructureParser:
             cols["_atom_site.B_iso_or_equiv"],
             cols["_atom_site.occupancy"],
         ):
-            # Parse standard polymer ATOM entries matching chain_id
-            if group == "ATOM" and chain == chain_id:
-                clean_atom_name = str(atom_name).strip()
+            clean_aa = str(aa).strip().upper()
+            # Accept standard ATOM group or HETATM groups that are recognized phosphoresidues
+            is_valid_group = (group == "ATOM") or (
+                group == "HETATM" and clean_aa in {"SEP", "TPO", "PTR"}
+            )
 
-                # Skip non-heavy atoms (Hydrogen / Deuterium)
-                if clean_atom_name.startswith(("H", "D", "1H", "2H", "3H")):
-                    continue
+            if not (is_valid_group and chain == chain_id):
+                continue
 
-                try:
-                    coord = [float(x), float(y), float(z)]
-                    res_num_str = str(seq_num)
-                    res_name_str = str(aa)
+            clean_atom_name = str(atom_name).strip()
 
-                    # 1. Accumulate all heavy atoms
-                    all_atom_coords.append(coord)
-                    all_atom_keys.append((chain_id, res_num_str))
-                    all_atom_names.append(clean_atom_name)
-                    all_atom_res_names.append(res_name_str)
+            # Skip non-heavy atoms (Hydrogen / Deuterium)
+            if clean_atom_name.startswith(("H", "D", "1H", "2H", "3H")):
+                continue
 
-                    # 2. Extract C-alpha backbone nodes
-                    if clean_atom_name == "CA":
-                        ca_coordinates.append(coord)
-                        aa_residues.append((res_num_str, res_name_str))
-                        ca_b_factors.append(float(b_val))
-                        ca_occupancies.append(float(occ_val))
+            try:
+                coord = [float(x), float(y), float(z)]
+                res_num_str = str(seq_num)
+                res_name_str = clean_aa
 
-                except ValueError as e:
-                    msg = (
-                        "Non-numeric spatial coordinates encountered in mmCIF"
-                        f" dictionary: {e}"
-                    )
-                    logger.error(msg)
-                    raise ValueError(msg) from e
+                # 1. Accumulate all heavy atoms
+                all_atom_coords.append(coord)
+                all_atom_keys.append((chain_id, res_num_str))
+                all_atom_names.append(clean_atom_name)
+                all_atom_res_names.append(res_name_str)
+
+                # 2. Extract C-alpha backbone nodes
+                if clean_atom_name == "CA":
+                    ca_coordinates.append(coord)
+                    aa_residues.append((res_num_str, res_name_str))
+                    ca_b_factors.append(float(b_val))
+                    ca_occupancies.append(float(occ_val))
+
+            except ValueError as e:
+                msg = (
+                    "Non-numeric spatial coordinates encountered in mmCIF"
+                    f" dictionary: {e}"
+                )
+                logger.error(msg)
+                raise ValueError(msg) from e
 
         if not ca_coordinates:
             raise ValueError(
