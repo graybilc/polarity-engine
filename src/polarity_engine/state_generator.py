@@ -67,6 +67,7 @@ def mutate_sep_to_ser(
         dict[str, Any]: A deep copy of the dictionary with SEP converted to SER.
     """
     mutated_dict = copy.deepcopy(parsed_dict)
+    mutated_dict.pop("rsasa", None)
 
     # 1. Locate data dictionary
     data_dict = None
@@ -87,6 +88,8 @@ def mutate_sep_to_ser(
 
     if data_dict is None:
         raise KeyError("Could not find valid structure keys in dictionary.")
+
+    data_dict.pop("rsasa", None)
 
     # 2. Update C-alpha / backbone residue lists
     if "aa_residues" in data_dict:
@@ -168,6 +171,7 @@ def mutate_structure_dict(
         dict[str, Any]: Mutated structure dictionary containing updated node features and expanded heavy-atom coordinates.
     """
     mutated_dict = copy.deepcopy(wt_parsed_dict)
+    mutated_dict.pop("rsasa", None)
 
     # 1. Locate data dictionary
     data_dict = None
@@ -185,6 +189,8 @@ def mutate_structure_dict(
 
     if data_dict is None:
         raise KeyError(f"Could not find valid structure keys in dictionary.")
+
+    data_dict.pop("rsasa", None)
 
     # 2. Extract or infer aa_residues from nodes
     if "aa_residues" in data_dict:

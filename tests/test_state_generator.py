@@ -167,23 +167,13 @@ class TestStateGenerator:
         assert all(res == "SER" for res in mutated_dict["all_atom_res_names"])
 
     def test_mutate_structure_dict_differentiates_glu_and_asp_rsasa(self) -> None:
-        """
-        Verifies that GLU and ASP mutations generate distinct heavy-atom structures
-        and yield different rSASA profiles via the builder pipeline.
-
-        Arrange:
-            Construct a mock wildcard parsed dictionary with base heavy-atom coordinate arrays.
-        Act:
-            Mutate structure to '100' state code using both GLU and ASP mimic residues,
-            then construct their respective PyG state graphs.
-        Assert:
-            Confirm heavy atom counts differ between GLU and ASP, and that their rSASA channels
-            are distinct.
-        """
         from polarity_engine.builder import ProteinGraphBuilder
 
         # Arrange
         wt_dict = make_mock_parsed_dict(n_residues=3)
+        wt_dict["coords"] = np.random.rand(3, 3).astype(
+            np.float32
+        )  # <-- Add this line!
         wt_dict["all_atom_coords"] = np.random.rand(6, 3).astype(np.float64)
         wt_dict["all_atom_keys"] = [("B", "655")] * 6
         wt_dict["all_atom_names"] = ["N", "CA", "C", "O", "CB", "OG"]

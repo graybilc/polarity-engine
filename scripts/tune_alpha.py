@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 scripts/tune_alpha.py
 Performs a grid search over the structural gating hyperparameter alpha
@@ -5,7 +6,9 @@ using a held-out validation split of historical assays.
 Ensures strict data hygiene by keeping the final test set (Parker & McDonald 2025) sealed.
 """
 
+from pathlib import Path
 import numpy as np
+import torch
 from polarity_engine.kinetics import PhosphoKineticSolver
 
 
@@ -25,7 +28,7 @@ def evaluate_alpha(
         graphs (dict): A dictionary mapping hypercube state codes (e.g., '000')
             to their respective PyTorch Geometric structural graph objects.
         site_mappings (dict): A dictionary mapping functional site identifiers
-            (e.g., 'site_3') to structural node feature indices.
+            to structural node feature indices.
 
     Returns:
         float: The average Mean Squared Error across all samples in the validation dataset.
@@ -90,20 +93,38 @@ if __name__ == "__main__":
         },
     ]
 
-    # Mock structural graphs and site mappings for validation run
-    mock_graphs = {
-        code: None for code in ["000", "100", "010", "001", "110", "101", "011", "111"]
-    }
-    mock_site_mappings = {"site_3": {"res_num": 138}}
+    # --- 2. LOAD COMPILED STRUCTURAL GRAPHS ---
+    graphs_dir = Path("output")
+    state_codes = ["000", "100", "010", "001", "110", "101", "011", "111"]
 
-    # --- 2. DEFINE HYPERPARAMETER GRID ---
-    alpha_grid = np.linspace(0.0, 3.0, 13)
+    print(f"--- Loading compiled PyG state graphs from {graphs_dir.resolve()} ---")
+    graphs = {}
+    for code in state_codes:
+        graph_path = graphs_dir / f"state_{code}.pt"
+        if not graph_path.is_file():
+            raise FileNotFoundError(
+                f"Required graph file missing: {graph_path}. Run state generation pipeline first."
+            )
+        graphs[code] = torch.load(graph_path, weights_only=False)
+
+    # --- 3. CONFIGURE SITE MAPPINGS ---
+    # Maps sorted residue keys ('655', '659', '663') to their corresponding row indices in graph.x
+    site_mappings = {
+        "sites": {
+            "655": {"target_res_num": 0},
+            "659": {"target_res_num": 1},
+            "663": {"target_res_num": 2},
+        }
+    }
+
+    # --- 4. DEFINE HYPERPARAMETER GRID & EXECUTE SEARCH ---
+    alpha_grid = np.linspace(0.0, 5.0, 11)
     best_alpha = None
     lowest_error = float("inf")
 
-    print("--- Starting Alpha Grid Search on Validation Split ---")
+    print("\n--- Starting Alpha Grid Search on Validation Split ---")
     for alpha in alpha_grid:
-        mse = evaluate_alpha(alpha, val_dataset, mock_graphs, mock_site_mappings)
+        mse = evaluate_alpha(alpha, val_dataset, graphs, site_mappings)
         print(f"Alpha: {alpha:.2f} | Validation MSE: {mse:.5f}")
         if mse < lowest_error:
             lowest_error = mse
