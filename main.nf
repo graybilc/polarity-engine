@@ -3,7 +3,7 @@ params.ref_cif    = "${projectDir}/data/8r3y.cif"
 params.lgl_chain  = 'L'
 params.cutoff     = 8.0
 params.sites      = '655,659,663'
-params.mimic_res  = 'GLU'
+params.mimic_res = params.mimic_res ?: 'GLU'
 params.regime     = 'processive'
 
 // Automatically isolate outputs and working directories by mimic residue

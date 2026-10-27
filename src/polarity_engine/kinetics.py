@@ -85,29 +85,14 @@ class PhosphoKineticSolver:
     def _compute_rate_multiplier(
         self, state_code: str, functional_site_id: str
     ) -> float:
-        """
-        Extracts relative Solvent Accessible Surface Area (rSASA) from PyG graph node
-        features and computes a structural gating multiplier. Higher rSASA (surface exposure)
-        enhances the phosphorylation rate.
-
-        Args:
-            state_code (str): The state identifier string (e.g., '000').
-            functional_site_id (str): The abstract site identifier (e.g., 'site_1').
-
-        Returns:
-            float: The rate multiplier scaling factor (e.g., exp(alpha * rSASA)).
-                   Returns 1.0 if the graph or site mapping is missing.
-        """
         graph = self.graphs.get(state_code)
         sites_dict = self.site_mappings.get("sites", {})
 
         if graph is None or not sites_dict:
             return 1.0
 
-        # Dynamically sort residue keys from the JSON (e.g., ['655', '659', '663'])
         sorted_res_keys = sorted(sites_dict.keys(), key=int)
 
-        # Map abstract names ('site_1', 'site_2', 'site_3') to sorted positions dynamically
         res_key = None
         if functional_site_id.startswith("site_"):
             try:
@@ -117,24 +102,34 @@ class PhosphoKineticSolver:
             except (ValueError, IndexError):
                 pass
 
-        # Fallback if a raw residue key was passed directly
         if not res_key or res_key not in sites_dict:
             res_key = functional_site_id
 
         if res_key not in sites_dict:
             return 1.0
 
-        site_info = sites_dict[res_key]
-        res_idx = site_info.get("target_res_num")
+        res_idx = None
+        if hasattr(graph, "nodes"):
+            for i, node in enumerate(graph.nodes):
+                if str(node[1]) == str(res_key):
+                    res_idx = i
+                    break
+
+        if res_idx is None:
+            site_info = sites_dict[res_key]
+            res_idx = site_info.get("target_res_num")
 
         if res_idx is None or res_idx >= graph.x.shape[0]:
             return 1.0
 
-        # Index 23 accounts for the 27-dimensional node feature tensor (22 one-hot + seq_pos + rSASA)
-        r_sasa = graph.x[res_idx, 23].item()
-        mult = np.exp(self.alpha * r_sasa)
+        r_sasa = graph.x[res_idx, 22].item()
 
-        return mult
+        # --- ADD THIS DEBUG PRINT ---
+        print(
+            f"[DEBUG] state={state_code} | site={res_key} | row={res_idx} | rSASA={r_sasa:.4f} | mult={np.exp(self.alpha * r_sasa):.4f}"
+        )
+
+        return np.exp(self.alpha * r_sasa)
 
     def _get_regime_scaler(self, transition_from: str, transition_to: str) -> float:
         """

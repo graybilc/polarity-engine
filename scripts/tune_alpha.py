@@ -94,13 +94,13 @@ if __name__ == "__main__":
     ]
 
     # --- 2. LOAD COMPILED STRUCTURAL GRAPHS ---
-    graphs_dir = Path("output")
+    graphs_dir = Path("output/graphs_glu")
     state_codes = ["000", "100", "010", "001", "110", "101", "011", "111"]
 
     print(f"--- Loading compiled PyG state graphs from {graphs_dir.resolve()} ---")
     graphs = {}
     for code in state_codes:
-        graph_path = graphs_dir / f"state_{code}.pt"
+        graph_path = graphs_dir / f"graph_{code}.pt"
         if not graph_path.is_file():
             raise FileNotFoundError(
                 f"Required graph file missing: {graph_path}. Run state generation pipeline first."
