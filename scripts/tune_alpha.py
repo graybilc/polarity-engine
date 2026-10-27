@@ -94,7 +94,7 @@ if __name__ == "__main__":
     ]
 
     # --- 2. LOAD COMPILED STRUCTURAL GRAPHS ---
-    graphs_dir = Path("output/graphs_glu")
+    graphs_dir = Path("output/graphs_asp")
     state_codes = ["000", "100", "010", "001", "110", "101", "011", "111"]
 
     print(f"--- Loading compiled PyG state graphs from {graphs_dir.resolve()} ---")

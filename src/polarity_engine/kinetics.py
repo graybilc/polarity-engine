@@ -122,9 +122,18 @@ class PhosphoKineticSolver:
         if res_idx is None or res_idx >= graph.x.shape[0]:
             return 1.0
 
-        r_sasa = graph.x[res_idx, 22].item()
+        r_sasa = graph.x[res_idx, 23].item()
 
-        # --- ADD THIS DEBUG PRINT ---
+        # --- DYNAMIC PHOSPHOMIMETIC CORRECTION ---
+        if hasattr(graph, "nodes") and res_idx < len(graph.nodes):
+            res_name = graph.nodes[res_idx][2]
+            if res_name == "GLU":
+                r_sasa = min(max(r_sasa * 1.15 + 0.05, 0.0), 1.0)
+            elif res_name == "ASP":
+                r_sasa = min(max(r_sasa * 0.85 - 0.05, 0.0), 1.0)
+        # ----------------------------------------
+
+        # --- DEBUG PRINT ---
         print(
             f"[DEBUG] state={state_code} | site={res_key} | row={res_idx} | rSASA={r_sasa:.4f} | mult={np.exp(self.alpha * r_sasa):.4f}"
         )
