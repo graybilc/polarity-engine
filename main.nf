@@ -42,9 +42,8 @@ workflow {
     )
 
     // 2. State Combinatorics
-    // (States with '0' at site 663 will mutate SEP -> SER; states with '1' retain native SEP or apply mimic_res)
     ch_mutate_inputs = ch_state_codes.combine(PARSE_WT_CIF.out.wt_parsed)
-    MUTATE_STATE(ch_mutate_inputs)
+    MUTATE_STATE(ch_mutate_inputs, params.mimic_res)
 
     // 3. Graph Tensor Assembly (Outputs 27-channel node feature tensors including SEP/SER and rSASA)
     BUILD_STATE_GRAPH(MUTATE_STATE.out.mutated_dict)
