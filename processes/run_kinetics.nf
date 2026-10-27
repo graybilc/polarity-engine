@@ -16,11 +16,12 @@ process RUN_KINETICS {
     script:
     def output_filename = "simulation_trajectories_${mimic_res.toLowerCase()}_${regime.toLowerCase()}.csv"
     """
-    python -m polarity_engine.cli simulate \\
-        --graphs_dir "." \\
-        --mappings "${site_mapping}" \\
-        --alpha 1.2 \\
-        --regime "${regime}" \\
+    python -m polarity_engine.cli simulate \
+        --graphs_dir "." \
+        --mappings "${site_mapping}" \
+        --alpha 1.2 \
+        --regime "${regime}" \
+        --mimic-res "${mimic_res}" \
         --output "${output_filename}"
     """
 }

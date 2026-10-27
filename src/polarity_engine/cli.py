@@ -44,6 +44,13 @@ def main():
         help="Kinetic mechanism regime.",
     )
     parser.add_argument(
+        "--mimic-res",
+        type=str,
+        default="GLU",
+        choices=["GLU", "ASP"],
+        help="Phosphomimetic residue type.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=Path("simulation_trajectories.csv"),
@@ -58,6 +65,7 @@ def main():
         print(f"Site Mappings    : {args.mappings}")
         print(f"Alpha (gating)   : {args.alpha}")
         print(f"Regime           : {args.regime}")
+        print(f"Mimic Residue    : {args.mimic_res}")
         print(f"Output Target    : {args.output}")
 
         graphs_path = Path(args.graphs_dir)

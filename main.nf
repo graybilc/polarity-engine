@@ -6,8 +6,9 @@ params.sites      = '655,659,663'
 params.mimic_res  = 'GLU'
 params.regime     = 'processive'
 
-// Standardized dynamic paths
-params.graphs_dir = "${projectDir}/output/graphs_${params.mimic_res.toLowerCase()}"
+// Automatically isolate outputs and working directories by mimic residue
+params.outdir     = "${projectDir}/output_${params.mimic_res.toLowerCase()}"
+params.graphs_dir = "${params.outdir}/graphs_${params.mimic_res.toLowerCase()}"
 params.output_csv = "simulation_trajectories_${params.mimic_res.toLowerCase()}_${params.regime}.csv"
 
 include { ALIGN_CIF         } from './processes/align_cif'

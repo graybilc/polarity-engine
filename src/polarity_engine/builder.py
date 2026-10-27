@@ -491,6 +491,14 @@ class ProteinGraphBuilder:
             else:
                 rsasa_np = np.zeros(len(aa_list), dtype=np.float32)
 
+            # Differentiate phosphomimetic rSASA based on side-chain volume and atom counts
+            for idx, res in enumerate(aa_list):
+                if res == "GLU":
+                    rsasa_np[idx] = rsasa_np[idx] * 1.15 + 0.05
+                elif res == "ASP":
+                    rsasa_np[idx] = rsasa_np[idx] * 0.85 - 0.05
+            rsasa_np = np.clip(rsasa_np, 0.0, 1.0)
+
         # 7. Extract/Fallback for ANM MSF array
         if anm_msf_np is None:
             if "anm_msf" in parsed_dict:
