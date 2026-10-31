@@ -1,11 +1,12 @@
 process BUILD_STATE_GRAPH {
-    tag "Build Graph ${state_code}"
+    tag "Build Graph ${state_code} (${mimic_res})"
     label 'process_medium'
 
-    publishDir "${params.graphs_dir}", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/graphs/${mimic_res.toUpperCase()}", mode: 'copy', overwrite: true
 
     input:
     tuple val(state_code), path(mutated_dict_pt)
+    val mimic_res
 
     output:
     tuple val(state_code), path("graph_${state_code}.pt"), emit: graph_pt

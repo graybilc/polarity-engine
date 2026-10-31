@@ -70,7 +70,7 @@ class TestNextflowPipeline:
 
         Arrange:
             - Resolve sample CIF fixture and create reference copy.
-            - Setup output and variant-specific graph directories.
+            - Setup output and variant-specific graph directories matching main.nf logic.
             - Construct Nextflow command with explicit parameter overrides.
 
         Act:
@@ -78,7 +78,7 @@ class TestNextflowPipeline:
 
         Assert:
             - Verify process return code is 0.
-            - Confirm existence of all 8 state graph tensors.
+            - Confirm existence of all 8 state graph tensors under the dynamic mimic-residue directory.
             - Validate loaded tensors contain valid 'x' and 'edge_index' attributes.
         """
         # Arrange
@@ -90,7 +90,10 @@ class TestNextflowPipeline:
         ref_cif_copy.write_bytes(sample_cif.read_bytes())
 
         outdir = tmp_path / "output_e2e"
-        graphs_dir = tmp_path / "graphs_glu"
+        mimic_res = "GLU"
+
+        # main.nf automatically dynamically resolves graphs_dir to ${params.outdir}/graphs/${params.mimic_res.toUpperCase()}
+        graphs_dir = outdir / "graphs" / mimic_res.upper()
 
         cmd = [
             "nextflow",
@@ -102,8 +105,8 @@ class TestNextflowPipeline:
             str(ref_cif_copy),
             "--outdir",
             str(outdir.resolve()),
-            "--graphs_dir",
-            str(graphs_dir.resolve()),
+            "--mimic_res",
+            mimic_res,
         ]
 
         # Act

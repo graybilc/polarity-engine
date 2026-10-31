@@ -85,14 +85,26 @@ class PhosphoKineticSolver:
     def _compute_rate_multiplier(
         self, state_code: str, functional_site_id: str
     ) -> float:
+        """
+        Computes the state-specific rSASA gating rate multiplier using
+        Linear Free Energy Relationship (LFER) exponential scaling.
+        """
         graph = self.graphs.get(state_code)
-        sites_dict = self.site_mappings.get("sites", {})
 
+        # Robust lookup for baseline wild-type graph ("000")
+        wt_graph = self.graphs.get("000")
+        if wt_graph is None:
+            for k in self.graphs.keys():
+                if str(k).endswith("000.pt") or str(k) == "000":
+                    wt_graph = self.graphs[k]
+                    break
+
+        sites_dict = self.site_mappings.get("sites", {})
         if graph is None or not sites_dict:
             return 1.0
 
+        # Map abstract site IDs (e.g., "site_1") to residue numbers (e.g., "655")
         sorted_res_keys = sorted(sites_dict.keys(), key=int)
-
         res_key = None
         if functional_site_id.startswith("site_"):
             try:
@@ -108,37 +120,51 @@ class PhosphoKineticSolver:
         if res_key not in sites_dict:
             return 1.0
 
+        target_res_num = str(res_key)
+
+        # --- FIX: Map PDB residue number to actual 0-indexed tensor row via graph.nodes ---
         res_idx = None
         if hasattr(graph, "nodes"):
             for i, node in enumerate(graph.nodes):
-                if str(node[1]) == str(res_key):
+                if str(node[1]) == target_res_num:
                     res_idx = i
                     break
-
-        if res_idx is None:
-            site_info = sites_dict[res_key]
-            res_idx = site_info.get("target_res_num")
 
         if res_idx is None or res_idx >= graph.x.shape[0]:
             return 1.0
 
-        r_sasa = graph.x[res_idx, 23].item()
+        # --- FEATURE EXTRACTION ---
+        rSASA_col_idx = 23
+        if graph.x.shape[1] <= rSASA_col_idx:
+            raise IndexError(
+                f"Feature tensor width {graph.x.shape[1]} is smaller than expected rSASA index {rSASA_col_idx}."
+            )
 
-        # --- DYNAMIC PHOSPHOMIMETIC CORRECTION ---
-        if hasattr(graph, "nodes") and res_idx < len(graph.nodes):
-            res_name = graph.nodes[res_idx][2]
-            if res_name == "GLU":
-                r_sasa = min(max(r_sasa * 1.15 + 0.05, 0.0), 1.0)
-            elif res_name == "ASP":
-                r_sasa = min(max(r_sasa * 0.85 - 0.05, 0.0), 1.0)
-        # ----------------------------------------
+        r_sasa = graph.x[res_idx, rSASA_col_idx].item()
 
-        # --- DEBUG PRINT ---
-        print(
-            f"[DEBUG] state={state_code} | site={res_key} | row={res_idx} | rSASA={r_sasa:.4f} | mult={np.exp(self.alpha * r_sasa):.4f}"
-        )
+        # Extract baseline rSASA from wild-type graph ("000") using the same residue lookup
+        wt_r_sasa = r_sasa
+        wt_res_idx = None
+        if wt_graph is not None and hasattr(wt_graph, "nodes"):
+            for i, node in enumerate(wt_graph.nodes):
+                if str(node[1]) == target_res_num:
+                    wt_res_idx = i
+                    break
 
-        return np.exp(self.alpha * r_sasa)
+        if (
+            wt_graph is not None
+            and wt_res_idx is not None
+            and wt_res_idx < wt_graph.x.shape[0]
+        ):
+            wt_r_sasa = wt_graph.x[wt_res_idx, rSASA_col_idx].item()
+
+        # Compute Delta rSASA relative to wild-type baseline
+        delta_r_sasa = r_sasa - wt_r_sasa
+
+        # Arrhenius-style exponential scaling (Linear Free Energy Relationship)
+        multiplier = float(np.exp(self.alpha * delta_r_sasa))
+
+        return multiplier
 
     def _get_regime_scaler(self, transition_from: str, transition_to: str) -> float:
         """
@@ -177,18 +203,18 @@ class PhosphoKineticSolver:
         """
         s000, s100, s010, s001, s110, s101, s011, s111 = y
 
-        # --- 1. rSASA Gating Multipliers (State-Specific Source Queries) ---
-        m_000_100 = self._compute_rate_multiplier("000", "site_1")
-        m_000_010 = self._compute_rate_multiplier("000", "site_2")
-        m_000_001 = self._compute_rate_multiplier("000", "site_3")
+        # --- 1. rSASA Gating Multipliers (Queried using the destination/mutated states) ---
+        m_000_100 = self._compute_rate_multiplier("100", "site_1")
+        m_000_010 = self._compute_rate_multiplier("010", "site_2")
+        m_000_001 = self._compute_rate_multiplier("001", "site_3")
 
-        m_100_110 = self._compute_rate_multiplier("100", "site_2")
-        m_001_101 = self._compute_rate_multiplier("001", "site_1")
-        m_010_011 = self._compute_rate_multiplier("010", "site_3")
+        m_100_110 = self._compute_rate_multiplier("110", "site_2")
+        m_001_101 = self._compute_rate_multiplier("101", "site_1")
+        m_010_011 = self._compute_rate_multiplier("011", "site_3")
 
-        m_110_111 = self._compute_rate_multiplier("110", "site_3")
-        m_101_111 = self._compute_rate_multiplier("101", "site_2")
-        m_011_111 = self._compute_rate_multiplier("011", "site_1")
+        m_110_111 = self._compute_rate_multiplier("111", "site_3")
+        m_101_111 = self._compute_rate_multiplier("111", "site_2")
+        m_011_111 = self._compute_rate_multiplier("111", "site_1")
 
         # --- 2. Regime-Dependent Topological Scalers ---
         sc_110 = self._get_regime_scaler("100", "110")

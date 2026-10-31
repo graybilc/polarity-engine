@@ -255,10 +255,28 @@ def mutate_structure_dict(
                             ),
                             coord,
                         )
-                        cg_coord = cb_coord + np.array([1.2, 0.5, 0.0])
+
+                        # --- STATE-DEPENDENT CONFORMATIONAL PERTURBATION ---
+                        # Convert binary state_code (e.g., '101') to a unique integer shift
+                        # to ensure each hypercube vertex produces distinct side-chain geometry.
+                        state_int = int(state_code, 2)
+                        perturbation = np.array(
+                            [
+                                ((state_int & 1) - 0.5) * 0.20,
+                                (((state_int >> 1) & 1) - 0.5) * 0.20,
+                                (((state_int >> 2) & 1) - 0.5) * 0.20,
+                            ]
+                        )
+                        # --------------------------------------------------
+
+                        cg_coord = cb_coord + np.array([1.2, 0.5, 0.0]) + perturbation
 
                         if target_mimic == "GLU":
-                            cd_coord = cg_coord + np.array([1.2, 0.4, 0.0])
+                            cd_coord = (
+                                cg_coord
+                                + np.array([1.2, 0.4, 0.0])
+                                + (perturbation * 0.5)
+                            )
                             oe1_coord = cd_coord + np.array([0.8, 0.6, 0.0])
                             oe2_coord = cd_coord + np.array([0.5, -0.7, 0.0])
 
@@ -273,7 +291,11 @@ def mutate_structure_dict(
                                 new_names.append(aname)
                                 new_res_names.append("GLU")
                         else:  # ASP
-                            od1_coord = cg_coord + np.array([0.8, 0.5, 0.0])
+                            od1_coord = (
+                                cg_coord
+                                + np.array([0.8, 0.5, 0.0])
+                                + (perturbation * 0.5)
+                            )
                             od2_coord = cg_coord + np.array([0.4, -0.8, 0.0])
 
                             for aname, acoord in [

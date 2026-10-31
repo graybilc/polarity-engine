@@ -2,11 +2,12 @@ process RUN_KINETICS {
     tag "Running Kinetic Simulation (${mimic_res} - ${params.regime})"
     label 'process_medium'
 
-    publishDir "${params.outdir}/trajectories", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/trajectories/${mimic_res}", mode: 'copy', overwrite: true
 
     input:
     val mimic_res
     val regime
+    val alpha
     path graphs_dir
     path site_mapping
 
@@ -19,7 +20,7 @@ process RUN_KINETICS {
     python -m polarity_engine.cli simulate \
         --graphs_dir "." \
         --mappings "${site_mapping}" \
-        --alpha 1.2 \
+        --alpha ${alpha} \
         --regime "${regime}" \
         --mimic-res "${mimic_res}" \
         --output "${output_filename}"

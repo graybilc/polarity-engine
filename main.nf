@@ -3,12 +3,13 @@ params.ref_cif    = "${projectDir}/data/8r3y.cif"
 params.lgl_chain  = 'L'
 params.cutoff     = 8.0
 params.sites      = '655,659,663'
-params.mimic_res = params.mimic_res ?: 'GLU'
+params.mimic_res  = params.mimic_res ?: 'GLU'
 params.regime     = 'processive'
+params.alpha      = 1.2  // <-- Added tuned hyperparameter default
 
 // Automatically isolate outputs and working directories by mimic residue
-params.outdir     = "${projectDir}/output_${params.mimic_res.toLowerCase()}"
-params.graphs_dir = "${params.outdir}/graphs_${params.mimic_res.toLowerCase()}"
+params.outdir     = "${projectDir}/output"
+params.graphs_dir = "${params.outdir}/graphs/${params.mimic_res.toUpperCase()}"
 params.output_csv = "simulation_trajectories_${params.mimic_res.toLowerCase()}_${params.regime}.csv"
 
 include { ALIGN_CIF         } from './processes/align_cif'
@@ -46,7 +47,7 @@ workflow {
     MUTATE_STATE(ch_mutate_inputs, params.mimic_res)
 
     // 3. Graph Tensor Assembly (Outputs 27-channel node feature tensors including SEP/SER and rSASA)
-    BUILD_STATE_GRAPH(MUTATE_STATE.out.mutated_dict)
+    BUILD_STATE_GRAPH(MUTATE_STATE.out.mutated_dict, params.mimic_res)
 
     // 4. Kinetic Simulation & rSASA Gating Solver
     ch_all_graphs = BUILD_STATE_GRAPH.out.graph_pt
@@ -56,6 +57,7 @@ workflow {
     RUN_KINETICS(
         params.mimic_res,
         params.regime,
+        params.alpha,
         ch_all_graphs,
         ALIGN_CIF.out.site_mapping
     )
