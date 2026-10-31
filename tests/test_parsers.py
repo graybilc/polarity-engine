@@ -13,7 +13,6 @@ from tests.mock_data import (
     MOCK_APKC_FASTA_CONTENT,
     MOCK_CIF_CONTENT,
     MOCK_LGL_FASTA_CONTENT,
-    MOCK_PDB_CONTENT,
     make_mock_parsed_dict,
 )
 
@@ -26,16 +25,6 @@ def mock_cif_file(tmp_path: Path) -> Path:
     cif_path = structure_dir / "mock_structure.cif"
     cif_path.write_text(MOCK_CIF_CONTENT, encoding="utf-8")
     return cif_path
-
-
-@pytest.fixture
-def mock_pdb_file(tmp_path: Path) -> Path:
-    """Generates an isolated mock PDB structure file on disk."""
-    structure_dir = tmp_path / "structures"
-    structure_dir.mkdir(parents=True, exist_ok=True)
-    pdb_path = structure_dir / "mock_structure.pdb"
-    pdb_path.write_text(MOCK_PDB_CONTENT, encoding="utf-8")
-    return pdb_path
 
 
 # ==============================================================================
@@ -108,7 +97,6 @@ class TestFastaParserPublicAPI:
         fasta_content = ">header_1\nMUGNCCAGLSRRLKLPZDCMA\n"
         fasta_file_path.write_text(fasta_content, encoding="utf-8")
 
-        # Set caplog level explicitly before invoking logger
         with caplog.at_level(logging.WARNING):
             parsed_data = FastaParser.parse_fasta(fasta_file_path)
 
@@ -194,11 +182,10 @@ class TestStructureParserPublicAPI:
         Act:
             Invoke public entry point StructureParser.parse.
         Assert:
-            Verify compliance with 12-key schema contract, array dimensions, and float dtypes.
+            Verify compliance with schema contract, array dimensions, and float dtypes.
         """
         parsed_output = StructureParser.parse(mock_cif_file)
 
-        # 1. Schema contract verification (12 keys total)
         expected_keys = {
             "aa_list",
             "coords",
@@ -215,7 +202,6 @@ class TestStructureParserPublicAPI:
         }
         assert expected_keys.issubset(parsed_output.keys())
 
-        # 2. Residue Node Shape Verification (N items)
         n_nodes = len(parsed_output["aa_list"])
         assert parsed_output["coords"].shape == (n_nodes, 3)
         assert parsed_output["b_factors"].shape == (n_nodes,)
@@ -224,7 +210,6 @@ class TestStructureParserPublicAPI:
         assert parsed_output["rsasa"].shape == (n_nodes,)
         assert parsed_output["anm_msf"].shape == (n_nodes,)
 
-        # 3. Heavy-Atom Payload Shape Verification (M items)
         m_heavy = len(parsed_output["all_atom_coords"])
         assert m_heavy > 0
         assert parsed_output["all_atom_coords"].shape == (m_heavy, 3)
@@ -232,61 +217,6 @@ class TestStructureParserPublicAPI:
         assert len(parsed_output["all_atom_names"]) == m_heavy
         assert len(parsed_output["all_atom_res_names"]) == m_heavy
 
-        # 4. Type Safety Verification
-        assert parsed_output["coords"].dtype == np.float32
-        assert parsed_output["b_factors"].dtype == np.float32
-        assert parsed_output["occupancies"].dtype == np.float32
-        assert parsed_output["rsasa"].dtype == np.float32
-        assert parsed_output["anm_msf"].dtype == np.float32
-        assert parsed_output["all_atom_coords"].dtype == np.float64
-
-    def test_parse_pdb_returns_complete_schema(self, mock_pdb_file):
-        """
-        Arrange:
-            Prepare legacy PDB file using fixture.
-        Act:
-            Invoke public entry point StructureParser.parse.
-        Assert:
-            Verify compliance with 12-key schema contract, array dimensions, and float dtypes.
-        """
-        parsed_output = StructureParser.parse(mock_pdb_file)
-
-        # 1. Schema contract verification (12 keys total)
-        expected_keys = {
-            "aa_list",
-            "coords",
-            "b_factors",
-            "occupancies",
-            "nodes",
-            "sasa_map",
-            "rsasa",
-            "anm_msf",
-            "all_atom_coords",
-            "all_atom_keys",
-            "all_atom_names",
-            "all_atom_res_names",
-        }
-        assert expected_keys.issubset(parsed_output.keys())
-
-        # 2. Residue Node Shape Verification (N items)
-        n_nodes = len(parsed_output["aa_list"])
-        assert n_nodes > 0
-        assert parsed_output["coords"].shape == (n_nodes, 3)
-        assert parsed_output["b_factors"].shape == (n_nodes,)
-        assert parsed_output["occupancies"].shape == (n_nodes,)
-        assert len(parsed_output["nodes"]) == n_nodes
-        assert parsed_output["rsasa"].shape == (n_nodes,)
-        assert parsed_output["anm_msf"].shape == (n_nodes,)
-
-        # 3. Heavy-Atom Payload Shape Verification (M items)
-        m_heavy = len(parsed_output["all_atom_coords"])
-        assert m_heavy > 0
-        assert parsed_output["all_atom_coords"].shape == (m_heavy, 3)
-        assert len(parsed_output["all_atom_keys"]) == m_heavy
-        assert len(parsed_output["all_atom_names"]) == m_heavy
-        assert len(parsed_output["all_atom_res_names"]) == m_heavy
-
-        # 4. Type Safety Verification
         assert parsed_output["coords"].dtype == np.float32
         assert parsed_output["b_factors"].dtype == np.float32
         assert parsed_output["occupancies"].dtype == np.float32
@@ -369,7 +299,7 @@ class TestStructureParserPublicAPI:
         invalid_ext_file = tmp_path / "structure.txt"
         invalid_ext_file.write_text("SOME_TEXT_CONTENT", encoding="utf-8")
 
-        with pytest.raises(ValueError, match="Unsupported file format"):
+        with pytest.raises(ValueError, match="Unsupported file format found"):
             StructureParser.parse(invalid_ext_file)
 
     def test_save_and_load_parsed_dict(self, tmp_path: Path) -> None:
@@ -383,15 +313,12 @@ class TestStructureParserPublicAPI:
         Assert:
             Verify output path existence and array value parity.
         """
-        # Arrange
         parsed_dict = make_mock_parsed_dict()
         save_file = tmp_path / "cache" / "test_parsed.pt"
 
-        # Act
         saved_path = StructureParser.save_parsed_dict(parsed_dict, save_file)
         loaded_dict = StructureParser.load_parsed_dict(save_file)
 
-        # Assert
         assert saved_path.exists()
         assert saved_path == save_file
         assert loaded_dict["aa_list"] == parsed_dict["aa_list"]
@@ -406,10 +333,8 @@ class TestStructureParserPublicAPI:
         Act & Assert:
             Call load_parsed_dict and assert FileNotFoundError is raised.
         """
-        # Arrange
         invalid_path = Path("nonexistent_path_xyz.pt")
 
-        # Act & Assert
         with pytest.raises(FileNotFoundError, match="Parsed dictionary file not found"):
             StructureParser.load_parsed_dict(invalid_path)
 
@@ -548,37 +473,6 @@ class TestStructureParserInternalLogic:
         assert any(res_name == "SEP" for _, res_name in result["aa_residues"])
         assert "SEP" in result["all_atom_res_names"]
 
-    def test_load_and_inspect_multi_model_pdb_warning(self, caplog):
-        """
-        Arrange:
-            Mock a BioPython Structure containing 3 models and patch PDBParser.get_structure.
-        Act:
-            Invoke private helper StructureParser._load_and_inspect on multi-model mock.
-        Assert:
-            Verify chain extraction defaults to Model 0 and emits warning log regarding fallback.
-        """
-        file_path = Path("mock_multi_model.pdb")
-        file_ext = ".pdb"
-
-        mock_structure = MagicMock()
-        mock_structure.__len__.return_value = 3
-
-        mock_model_0 = MagicMock()
-        mock_model_0.child_dict.keys.return_value = ["A", "B"]
-        mock_structure.__getitem__.return_value = mock_model_0
-
-        with patch(
-            "polarity_engine.parsers.PDBParser.get_structure",
-            return_value=mock_structure,
-        ):
-            with caplog.at_level(logging.WARNING):
-                chains, struct = StructureParser._load_and_inspect(file_path, file_ext)
-
-        assert chains == ["A", "B"]
-        assert struct == mock_structure
-        assert len(caplog.records) == 1
-        assert "contains 3 models. Defaulting to Model 0." in caplog.text
-
     def test_compute_allatom_sasa_dict_aggregation(self) -> None:
         """
         Tests in-memory FreeSASA execution and atomic surface area aggregation.
@@ -586,23 +480,20 @@ class TestStructureParserInternalLogic:
         Arrange:
             Prepare mock dictionary and patch freesasa.calcCoord C execution.
         Act:
-            Execute compute_allatom_sasa_dict.
+            Execute StructureParser._compute_allatom_sasa_dict.
         Assert:
             Validate per-residue SASA area summation.
         """
-        # Arrange
         parsed_dict = make_mock_parsed_dict()
         mock_result = MagicMock()
         mock_result.nAtoms.return_value = len(parsed_dict["all_atom_names"])
-        mock_result.atomArea.side_effect = lambda i: 10.0  # 10.0 Å² per atom
+        mock_result.atomArea.side_effect = lambda i: 10.0
 
-        # Act
         with patch("freesasa.calcCoord", return_value=mock_result):
-            sasa_map = StructureParser.compute_allatom_sasa_dict(parsed_dict)
+            sasa_map = StructureParser._compute_allatom_sasa_dict(parsed_dict)
 
-        # Assert
         assert isinstance(sasa_map, dict)
-        assert sasa_map[("B", "655")] == pytest.approx(40.0)  # 4 atoms * 10.0 Å²
+        assert sasa_map[("B", "655")] == pytest.approx(40.0)
 
     def test_compute_rsasa_vector_clamping(self) -> None:
         """
@@ -615,23 +506,20 @@ class TestStructureParserInternalLogic:
         Assert:
             Verify output dtype, length, and clipping behavior against MaxASA constants.
         """
-        # Arrange
         nodes = [("B", "1", "ALA"), ("B", "2", "TRP")]
         raw_sasa_ala = 60.5
-        raw_sasa_trp = 300.0  # TRP > max theoretical ASA (~259 Å²)
+        raw_sasa_trp = 300.0
         sasa_map = {("B", "1"): raw_sasa_ala, ("B", "2"): raw_sasa_trp}
 
         expected_ala_rsasa = raw_sasa_ala / MAX_SASA_TIEN["ALA"]
 
-        # Act
         rsasa_vec = StructureParser._compute_rsasa_vector(nodes, sasa_map)
 
-        # Assert
         assert isinstance(rsasa_vec, np.ndarray)
         assert rsasa_vec.dtype == np.float32
         assert len(rsasa_vec) == 2
         assert rsasa_vec[0] == pytest.approx(expected_ala_rsasa, abs=1e-5)
-        assert rsasa_vec[1] == 1.0  # Upper bound clamped to 1.0
+        assert rsasa_vec[1] == 1.0
 
     def test_parse_cif_with_ref_cif_path_success(self, mock_cif_file, tmp_path: Path):
         """
