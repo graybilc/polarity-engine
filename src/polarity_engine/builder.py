@@ -12,13 +12,22 @@ from torch_geometric.data import Data
 from polarity_engine.constants import AMINO_ACID_TO_INDEX
 from polarity_engine.parsers import StructureParser
 
-# Configure logger
 logger = logging.getLogger(__name__)
 
 
 def load_resolved_site_mapping(
     mapping_json_path: Union[str, Path],
 ) -> Dict[str, Dict[str, Any]]:
+    """
+    Loads resolved phosphorylation site mapping JSON and extracts structural attributes per site.
+
+    Args:
+        mapping_json_path (str | Path): File path to the site mapping JSON file.
+
+    Returns:
+        site_nodes (Dict[str, Dict[str, Any]]): Dictionary mapping site IDs to their residue number,
+            anchor flag, and amino acid type.
+    """
     path = Path(mapping_json_path)
     if not path.is_file():
         raise FileNotFoundError(f"Site mapping JSON not found: {path}")
@@ -46,7 +55,19 @@ def load_resolved_site_mapping(
 
 
 class GaussianRBF(nn.Module):
+    """
+    Computes Radial Basis Function (RBF) expansions using Gaussian kernels over inter-residue distances.
+    """
+
     def __init__(self, start: float = 0.0, stop: float = 8.0, num_gaussians: int = 16):
+        """
+        Initializes the Gaussian RBF module with specified distance bounds and kernel counts.
+
+        Args:
+            start (float): Minimum distance value for kernel centers. Defaults to 0.0.
+            stop (float): Maximum distance value for kernel centers. Defaults to 8.0.
+            num_gaussians (int): Number of Gaussian RBF channels to generate. Defaults to 16.
+        """
         super().__init__()
         mu = torch.linspace(start, stop, num_gaussians)
         delta = (stop - start) / (num_gaussians - 1)
@@ -56,6 +77,15 @@ class GaussianRBF(nn.Module):
         self.register_buffer("gamma", torch.tensor(gamma))
 
     def forward(self, dist: torch.Tensor) -> torch.Tensor:
+        """
+        Projects scalar distances into Gaussian RBF feature space.
+
+        Args:
+            dist (torch.Tensor): Tensor of pairwise Euclidean distances.
+
+        Returns:
+            torch.Tensor: Expanded Gaussian RBF tensor features.
+        """
         if dist.dim() == 1:
             dist = dist.unsqueeze(-1)
         diff = dist - self.mu.unsqueeze(0)
@@ -63,13 +93,34 @@ class GaussianRBF(nn.Module):
 
 
 class ProteinGraphBuilder:
+    """
+    Constructs PyTorch Geometric Data graph objects from parsed protein structures
+    with standardized 27-dimensional node features and 20-dimensional edge attributes.
+    """
+
     def __init__(self, distance_cutoff: float = 8.0, num_rbf_kernels: int = 16) -> None:
+        """
+        Initializes the ProteinGraphBuilder with spatial cutoff and RBF expansion parameters.
+
+        Args:
+            distance_cutoff (float): Maximum Euclidean distance threshold for spatial edge creation. Defaults to 8.0.
+            num_rbf_kernels (int): Number of RBF expansion channels for edge attributes. Defaults to 16.
+        """
         self.distance_cutoff = distance_cutoff
         self.rbf_module = GaussianRBF(
             start=0.0, stop=distance_cutoff, num_gaussians=num_rbf_kernels
         )
 
     def _encode_node_feature(self, aa_list: list[str]) -> torch.Tensor:
+        """
+        Encodes amino acid sequence identity and normalized sequence position into base node features.
+
+        Args:
+            aa_list (list[str]): List of 3-letter amino acid residue names.
+
+        Returns:
+            torch.Tensor: Base node feature tensor combining one-hot amino acid encoding and sequence position.
+        """
         aa_indices = torch.tensor(
             [
                 AMINO_ACID_TO_INDEX.get(res.upper(), AMINO_ACID_TO_INDEX["UNK"])
@@ -87,6 +138,16 @@ class ProteinGraphBuilder:
     def _distance_to_sparse_coo(
         self, dist_matrix: torch.Tensor, include_self_loops: bool = False
     ) -> tuple[torch.Tensor, int]:
+        """
+        Converts a pairwise distance matrix into a sparse COO format edge index tensor.
+
+        Args:
+            dist_matrix (torch.Tensor): Square matrix of pairwise Euclidean distances.
+            include_self_loops (bool): Whether to include self-loop edges where distance is zero. Defaults to False.
+
+        Returns:
+            tuple[torch.Tensor, int]: A tuple containing the COO edge index tensor and total edge count.
+        """
         if include_self_loops:
             mask = dist_matrix <= self.distance_cutoff
         else:
@@ -99,6 +160,15 @@ class ProteinGraphBuilder:
     def _compute_edge_geometric_attrs(
         self, coords: np.ndarray
     ) -> dict[str, torch.Tensor]:
+        """
+        Computes geometric edge attributes including distances, unit vectors, and adjacency indices.
+
+        Args:
+            coords (np.ndarray): Cartesian coordinates of C-alpha atoms of shape (N, 3).
+
+        Returns:
+            dict[str, torch.Tensor]: Dictionary containing edge index, scalar distances, and unit direction vectors.
+        """
         coords_torch = torch.from_numpy(coords).float()
         dist_matrix = torch.cdist(coords_torch, coords_torch)
         edge_index, _ = self._distance_to_sparse_coo(dist_matrix)
@@ -120,6 +190,16 @@ class ProteinGraphBuilder:
     def _compute_inter_chain_flag(
         edge_index: torch.Tensor, nodes: list[tuple[str, str, str]]
     ) -> torch.Tensor:
+        """
+        Computes inter-chain binary flags for graph edges based on residue chain identifiers.
+
+        Args:
+            edge_index (torch.Tensor): Graph connectivity tensor of shape (2, E).
+            nodes (list[tuple[str, str, str]]): List of standardized node descriptors (chain_id, res_num, res_name).
+
+        Returns:
+            torch.Tensor: Tensor of shape (E, 1) indicating whether an edge spans different chains (1.0) or the same chain (0.0).
+        """
         num_edges = edge_index.shape[1]
         if num_edges == 0:
             return torch.zeros((0, 1), dtype=torch.float32)
@@ -144,6 +224,24 @@ class ProteinGraphBuilder:
         anm_msf_np: np.ndarray | None = None,
         name: str = "",
     ) -> Data:
+        """
+        Constructs a PyTorch Geometric Data object encapsulating 27-dimensional node features
+        and 20-dimensional edge attributes for a protein structure.
+
+        Args:
+            aa_list (list[str]): List of 3-letter amino acid names for each residue node.
+            coords_np (np.ndarray): C-alpha Cartesian coordinates of shape (N, 3).
+            b_factors_np (np.ndarray): Crystallographic temperature factors of shape (N,).
+            occupancies_np (np.ndarray): Atom occupancy values of shape (N,).
+            nodes (list[tuple[str, str, str]]): List of standardized node descriptors (chain_id, res_num, res_name).
+            rsasa_np (np.ndarray): Relative solvent accessible surface area values of shape (N,).
+            anm_msf_np (np.ndarray | None): ANM mean-square fluctuation values of shape (N,). Defaults to None.
+            name (str): Identifier name for the graph object. Defaults to "".
+
+        Returns:
+            Data: PyTorch Geometric Data object containing node features `x`, edge attributes `edge_attr`,
+                edge indices `edge_index`, coordinates `pos`, and structural metadata.
+        """
         num_nodes = len(aa_list)
 
         # 1. Validate metadata and feature vector lengths
@@ -232,6 +330,19 @@ class ProteinGraphBuilder:
         site_mapping: dict | None = None,
         name: str = "",
     ) -> Data:
+        """
+        Builds a PyTorch Geometric protein graph directly from a pre-parsed structure dictionary.
+
+        Args:
+            parsed_dict (dict[str, Any]): Dictionary containing structural arrays and metadata from StructureParser.
+            rsasa_np (np.ndarray | None): Optional pre-computed rSASA vector. Defaults to None.
+            anm_msf_np (np.ndarray | None): Optional pre-computed ANM MSF vector. Defaults to None.
+            site_mapping (dict | None): Optional site mapping dictionary for phosphorylation analysis. Defaults to None.
+            name (str): Identifier name for the graph object. Defaults to "".
+
+        Returns:
+            Data: PyTorch Geometric Data object constructed from the parsed dictionary attributes.
+        """
         if "nodes" in parsed_dict:
             nodes = parsed_dict["nodes"]
         elif "aa_residues" in parsed_dict and "all_atom_keys" in parsed_dict:
