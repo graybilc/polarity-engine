@@ -1,5 +1,5 @@
 process BUILD_STATE_GRAPH {
-    tag "Build Graph ${state_code}"
+    tag "Build Graph ${state_code} (${params.mimic_res})"
     label 'process_medium'
 
     publishDir "${params.outdir}/graphs/${params.mimic_res.toUpperCase()}", mode: 'copy', overwrite: true
@@ -13,10 +13,10 @@ process BUILD_STATE_GRAPH {
 
     script:
     """
-    uv run python ${projectDir}/scripts/build_state_graph.py \\
-        --input "${mutated_dict_pt}" \\
-        --state-code "${state_code}" \\
-        --cutoff "${params.cutoff}" \\
+    uv run python ${projectDir}/scripts/build_state_graph.py \
+        --input "${mutated_dict_pt}" \
+        --state-code "${state_code}" \
+        --cutoff "${params.cutoff}" \
         --output "graph_${state_code}.pt"
     """
 
