@@ -2,6 +2,15 @@
 
 from typing import Dict, Final
 
+NODE_FEATURE_INDICES = {
+    "ONE_HOT_START": 0,
+    "SEQ_POS": 22,
+    "RSASA": 23,
+    "B_FACTOR": 24,
+    "OCCUPANCY": 25,
+    "ANM_MSF": 26,
+}
+
 AMINO_ACID_TO_INDEX: Final[Dict[str, int]] = {
     "ALA": 0,
     "ARG": 1,

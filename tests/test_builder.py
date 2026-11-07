@@ -8,7 +8,7 @@ from pathlib import Path
 from torch_geometric.data import Data
 
 from polarity_engine.builder import ProteinGraphBuilder, load_resolved_site_mapping
-from polarity_engine.constants import AMINO_ACID_TO_INDEX
+from polarity_engine.constants import AMINO_ACID_TO_INDEX, NODE_FEATURE_INDICES
 from tests.mock_data import (
     MOCK_NODES,
     MOCK_AA_LIST,
@@ -24,11 +24,11 @@ from tests.mock_data import (
     make_mock_parsed_dict,
 )
 
-SEQ_POS_COL = 22
-RSASA_COL = 23
-B_FACTOR_COL = 24
-OCCUPANCY_COL = 25
-ANM_MSF_COL = 26
+SEQ_POS_COL = NODE_FEATURE_INDICES["SEQ_POS"]
+RSASA_COL = NODE_FEATURE_INDICES["RSASA"]
+B_FACTOR_COL = NODE_FEATURE_INDICES["B_FACTOR"]
+OCCUPANCY_COL = NODE_FEATURE_INDICES["OCCUPANCY"]
+ANM_MSF_COL = NODE_FEATURE_INDICES["ANM_MSF"]
 
 EXPECTED_FEATURE_DIM = (
     len(AMINO_ACID_TO_INDEX) + 5

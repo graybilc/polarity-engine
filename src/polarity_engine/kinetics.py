@@ -12,6 +12,8 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from typing import Dict, Any, Tuple, Optional
 
+from polarity_engine.constants import NODE_FEATURE_INDICES
+
 
 class PhosphoKineticSolver:
     """
@@ -88,83 +90,52 @@ class PhosphoKineticSolver:
         """
         Computes the state-specific rSASA gating rate multiplier using
         Linear Free Energy Relationship (LFER) exponential scaling.
+
+        Args:
+            state_code (str): Binary state code representing the current structural state (e.g., '100', '110').
+            functional_site_id (str): Functional site identifier (e.g., residue number).
+
+        Returns:
+            float: Calculated Arrhenius-style exponential rate multiplier based on relative SASA changes.
         """
         graph = self.graphs.get(state_code)
-
-        # Robust lookup for baseline wild-type graph ("000")
         wt_graph = self.graphs.get("000")
-        if wt_graph is None:
-            for k in self.graphs.keys():
-                if str(k).endswith("000.pt") or str(k) == "000":
-                    wt_graph = self.graphs[k]
-                    break
-
         sites_dict = self.site_mappings.get("sites", {})
+
         if graph is None or not sites_dict:
             return 1.0
 
-        # Map abstract site IDs (e.g., "site_1") to residue numbers (e.g., "655")
-        sorted_res_keys = sorted(sites_dict.keys(), key=int)
-        res_key = None
-        if functional_site_id.startswith("site_"):
-            try:
-                idx = int(functional_site_id.split("_")[1]) - 1
-                if 0 <= idx < len(sorted_res_keys):
-                    res_key = sorted_res_keys[idx]
-            except (ValueError, IndexError):
-                pass
+        # Resolve target residue number from site mappings or direct identifier
+        target_res_num = str(sites_dict.get(functional_site_id, functional_site_id))
 
-        if not res_key or res_key not in sites_dict:
-            res_key = functional_site_id
-
-        if res_key not in sites_dict:
-            return 1.0
-
-        target_res_num = str(res_key)
-
-        # --- FIX: Map PDB residue number to actual 0-indexed tensor row via graph.nodes ---
-        res_idx = None
-        if hasattr(graph, "nodes"):
-            for i, node in enumerate(graph.nodes):
-                if str(node[1]) == target_res_num:
-                    res_idx = i
-                    break
-
+        # Map residue number to 0-indexed tensor row via graph nodes
+        res_idx = next(
+            (i for i, node in enumerate(graph.nodes) if str(node[1]) == target_res_num),
+            None,
+        )
         if res_idx is None or res_idx >= graph.x.shape[0]:
             return 1.0
 
-        # --- FEATURE EXTRACTION ---
-        rSASA_col_idx = 23
-        if graph.x.shape[1] <= rSASA_col_idx:
-            raise IndexError(
-                f"Feature tensor width {graph.x.shape[1]} is smaller than expected rSASA index {rSASA_col_idx}."
-            )
+        # Extract rSASA feature for the target residue
+        r_sasa = graph.x[res_idx, NODE_FEATURE_INDICES["RSASA"]].item()
 
-        r_sasa = graph.x[res_idx, rSASA_col_idx].item()
-
-        # Extract baseline rSASA from wild-type graph ("000") using the same residue lookup
+        # Extract baseline rSASA from wild-type graph ("000") if available
         wt_r_sasa = r_sasa
-        wt_res_idx = None
         if wt_graph is not None and hasattr(wt_graph, "nodes"):
-            for i, node in enumerate(wt_graph.nodes):
-                if str(node[1]) == target_res_num:
-                    wt_res_idx = i
-                    break
+            wt_res_idx = next(
+                (
+                    i
+                    for i, node in enumerate(wt_graph.nodes)
+                    if str(node[1]) == target_res_num
+                ),
+                None,
+            )
+            if wt_res_idx is not None and wt_res_idx < wt_graph.x.shape[0]:
+                wt_r_sasa = wt_graph.x[wt_res_idx, NODE_FEATURE_INDICES["RSASA"]].item()
 
-        if (
-            wt_graph is not None
-            and wt_res_idx is not None
-            and wt_res_idx < wt_graph.x.shape[0]
-        ):
-            wt_r_sasa = wt_graph.x[wt_res_idx, rSASA_col_idx].item()
-
-        # Compute Delta rSASA relative to wild-type baseline
+        # Compute LFER exponential scaling based on Delta rSASA
         delta_r_sasa = r_sasa - wt_r_sasa
-
-        # Arrhenius-style exponential scaling (Linear Free Energy Relationship)
-        multiplier = float(np.exp(self.alpha * delta_r_sasa))
-
-        return multiplier
+        return float(np.exp(self.alpha * delta_r_sasa))
 
     def _get_regime_scaler(self, transition_from: str, transition_to: str) -> float:
         """
@@ -203,7 +174,7 @@ class PhosphoKineticSolver:
         """
         s000, s100, s010, s001, s110, s101, s011, s111 = y
 
-        # --- 1. rSASA Gating Multipliers (Queried using the destination/mutated states) ---
+        # rSASA Gating Multipliers (Queried using the destination/mutated states)
         m_000_100 = self._compute_rate_multiplier("100", "site_1")
         m_000_010 = self._compute_rate_multiplier("010", "site_2")
         m_000_001 = self._compute_rate_multiplier("001", "site_3")
@@ -216,13 +187,13 @@ class PhosphoKineticSolver:
         m_101_111 = self._compute_rate_multiplier("111", "site_2")
         m_011_111 = self._compute_rate_multiplier("111", "site_1")
 
-        # --- 2. Regime-Dependent Topological Scalers ---
+        # Regime-Dependent Topological Scalers
         sc_110 = self._get_regime_scaler("100", "110")
         sc_101 = self._get_regime_scaler("001", "101")
         sc_011 = self._get_regime_scaler("010", "011")
         sc_111 = self._get_regime_scaler("x", "111")
 
-        # --- 3. Effective Rates ---
+        # Effective Rates
         k_0_100 = self.base_rates["k_000_100"] * m_000_100
         k_0_010 = self.base_rates["k_000_010"] * m_000_010
         k_0_001 = self.base_rates["k_000_001"] * m_000_001
@@ -235,7 +206,7 @@ class PhosphoKineticSolver:
         k_101_111 = self.base_rates["k_101_111"] * m_101_111 * sc_111
         k_011_111 = self.base_rates["k_011_111"] * m_011_111 * sc_111
 
-        # --- 4. Mass-Action Differential Equations ---
+        # Mass-Action Differential Equations
         ds000_dt = -(k_0_100 + k_0_010 + k_0_001) * s000 + (
             self.base_rates["k_100_000"] * s100
             + self.base_rates["k_010_000"] * s010
