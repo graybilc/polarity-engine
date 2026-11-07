@@ -1,8 +1,8 @@
 process BUILD_STATE_GRAPH {
-    tag "Build Graph ${state_code} (${mimic_res})"
+    tag "Build Graph ${state_code}"
     label 'process_medium'
 
-    publishDir "${params.outdir}/graphs/${mimic_res.toUpperCase()}", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/graphs/${params.mimic_res.toUpperCase()}", mode: 'copy', overwrite: true
 
     input:
     tuple val(state_code), path(mutated_dict_pt)
