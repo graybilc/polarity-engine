@@ -31,6 +31,8 @@ THREE_TO_ONE = {
     "VAL": "V",
     "TRP": "W",
     "TYR": "Y",
+    "SER": "S",
+    "SEP": "S",
 }
 
 
@@ -61,7 +63,9 @@ def get_all_chain_sequences(cif_path: str) -> Dict[str, Tuple[str, List[int]]]:
             seq_chars = []
             res_nums = []
             for residue in chain:
-                if residue.get_id()[0] == " ":
+                het_flag = residue.get_id()[0]
+                # Accept standard amino acids (" ") and modified residues starting with "H_" (like H_SEP)
+                if het_flag == " " or het_flag.startswith("H_"):
                     res_name = residue.get_resname()
                     if res_name in THREE_TO_ONE:
                         seq_chars.append(THREE_TO_ONE[res_name])
@@ -142,7 +146,13 @@ def map_target_residues(
             "target_chain": tgt_chain_id,
             "target_range": [tgt_nums[0], tgt_nums[-1]],
         },
-        "sites": {},
+        "sites": {
+            str(s): {
+                "status": "UNMODELED",
+                "note": f"Site {s} not successfully aligned or mapped",
+            }
+            for s in target_sites
+        },
     }
 
     for site in target_sites:

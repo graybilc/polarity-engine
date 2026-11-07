@@ -2,6 +2,15 @@
 
 from typing import Dict, Final
 
+NODE_FEATURE_INDICES = {
+    "ONE_HOT_START": 0,
+    "SEQ_POS": 22,
+    "RSASA": 23,
+    "B_FACTOR": 24,
+    "OCCUPANCY": 25,
+    "ANM_MSF": 26,
+}
+
 AMINO_ACID_TO_INDEX: Final[Dict[str, int]] = {
     "ALA": 0,
     "ARG": 1,
@@ -23,11 +32,10 @@ AMINO_ACID_TO_INDEX: Final[Dict[str, int]] = {
     "TRP": 17,
     "TYR": 18,
     "VAL": 19,
-    "UNK": 20,  # Unknown / Non-standard
+    "SEP": 20,  # Explicit designation for Phosphoserine
+    "UNK": 21,  # Unknown / Non-standard
 }
 
-# Maximum Accessible Surface Area (maxASA) in square Angstroms (A^2)
-# Reference: Tien et al. (2013), PLoS ONE 8(11): e80635. (Theoretical scale)
 MAX_SASA_TIEN: Final[Dict[str, float]] = {
     "ALA": 129.0,
     "ARG": 274.0,
@@ -49,6 +57,7 @@ MAX_SASA_TIEN: Final[Dict[str, float]] = {
     "TRP": 285.0,
     "TYR": 263.0,
     "VAL": 160.0,
+    "SEP": 220.0,  # Extended MaxASA accounting for the phosphate group
 }
 
 # Empirical average across standard 20 residues to handle unknown/non-standard AA classes

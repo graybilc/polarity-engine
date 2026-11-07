@@ -16,17 +16,6 @@ MOCK_APKC_FASTA_CONTENT = (
     "\nMPTQRDSSTMSHTVA\ngggSGDHS\n"
 )
 
-# Minimal valid PDB coordinate string for testing (Chain A, 2 residues)
-MOCK_PDB_CONTENT = (
-    "ATOM      1  N   MET A   1      24.084  14.017   4.721  1.00 20.00           N\n"
-    "ATOM      2  CA  MET A   1      24.520  15.421   4.900  1.00 20.00           C\n"
-    "ATOM      3  C   MET A   1      26.012  15.510   5.120  1.00 20.00           C\n"
-    "ATOM      4  O   MET A   1      26.741  14.542   4.990  1.00 20.00           O\n"
-    "ATOM      5  N   GLY A   2      26.471  16.691   5.441  1.00 21.00           N\n"
-    "ATOM      6  CA  GLY A   2      27.892  16.920   5.690  1.00 21.00           C\n"
-    "END\n"
-)
-
 MOCK_CIF_CONTENT = """data_mock_structure
 #
 loop_

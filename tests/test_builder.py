@@ -8,6 +8,7 @@ from pathlib import Path
 from torch_geometric.data import Data
 
 from polarity_engine.builder import ProteinGraphBuilder, load_resolved_site_mapping
+from polarity_engine.constants import AMINO_ACID_TO_INDEX, NODE_FEATURE_INDICES
 from tests.mock_data import (
     MOCK_NODES,
     MOCK_AA_LIST,
@@ -23,11 +24,15 @@ from tests.mock_data import (
     make_mock_parsed_dict,
 )
 
-SEQ_POS_COL = 21
-RSASA_COL = 22
-B_FACTOR_COL = 23
-OCCUPANCY_COL = 24
-ANM_MSF_COL = 25
+SEQ_POS_COL = NODE_FEATURE_INDICES["SEQ_POS"]
+RSASA_COL = NODE_FEATURE_INDICES["RSASA"]
+B_FACTOR_COL = NODE_FEATURE_INDICES["B_FACTOR"]
+OCCUPANCY_COL = NODE_FEATURE_INDICES["OCCUPANCY"]
+ANM_MSF_COL = NODE_FEATURE_INDICES["ANM_MSF"]
+
+EXPECTED_FEATURE_DIM = (
+    len(AMINO_ACID_TO_INDEX) + 5
+)  # 1 seq_pos + 4 biophysical features
 
 
 @pytest.fixture
@@ -187,7 +192,7 @@ class TestProteinGraphBuilder:
         E = data.edge_index.shape[1]
 
         # Node Features: (N, 25) -> 21 one-hot + 1 seq_pos + 1 rSASA + 1 B-factor + 1 occupancy + anm_msf
-        assert data.x.shape == (N, 26)
+        assert data.x.shape == (N, EXPECTED_FEATURE_DIM)
         assert data.x.dtype == torch.float32
 
         # Verify rSASA, B-factors, and Occupancies in node feature tensor slices
@@ -236,7 +241,7 @@ class TestProteinGraphBuilder:
         )
 
         # 1. Verify tensor shapes
-        assert data.x.shape == (1, 26)
+        assert data.x.shape == (1, EXPECTED_FEATURE_DIM)
         assert data.edge_index.shape == (2, 0)
         assert data.edge_attr.shape == (0, 20)
 
@@ -444,7 +449,7 @@ class TestProteinGraphBuilder:
             name="mock_complex",
         )
 
-        assert data.x.shape == (4, 26)
+        assert data.x.shape == (4, EXPECTED_FEATURE_DIM)
         rsasa_column = data.x[:, RSASA_COL]
         assert torch.allclose(rsasa_column, torch.from_numpy(MOCK_RSASA_NP).float())
 
@@ -455,7 +460,7 @@ class TestProteinGraphBuilder:
         Act:
             Build graph without passing anm_msf_np parameter (defaulting to None).
         Assert:
-            Verify node features tensor shape is (N, 26) and ANM MSF channel contains zeros.
+            Verify node features tensor shape is (N, EXPECTED_FEATURE_DIM) and ANM MSF channel contains zeros.
         """
         aa_list, coords, b_factors, occupancies, nodes, rsasa, _, name = (
             dummy_5_residue_protein
@@ -470,7 +475,7 @@ class TestProteinGraphBuilder:
             name=name,
         )
 
-        assert data.x.shape == (len(aa_list), 26)
+        assert data.x.shape == (len(aa_list), EXPECTED_FEATURE_DIM)
         assert torch.allclose(
             data.x[:, ANM_MSF_COL], torch.zeros(len(aa_list), dtype=torch.float32)
         )
@@ -553,7 +558,7 @@ class TestProteinGraphBuilder:
         # Assert
         assert isinstance(graph, Data)
         assert graph.x.shape[0] == 5  # 5 nodes
-        assert graph.x.shape[1] == 26  # 26 node feature channels
+        assert graph.x.shape[1] == EXPECTED_FEATURE_DIM
         assert graph.name == "state_000"
         assert hasattr(graph, "site_mapping")
         assert graph.site_mapping == mock_site_mapping
@@ -583,5 +588,53 @@ class TestProteinGraphBuilder:
         # Assert
         assert isinstance(graph, Data)
         assert graph.x.shape[0] == 5
-        assert graph.x.shape[1] == 26
+        assert graph.x.shape[1] == EXPECTED_FEATURE_DIM
         assert not hasattr(graph, "site_mapping") or graph.site_mapping is None
+
+    def test_build_from_parsed_dict_recomputes_rsasa_for_mutants(self) -> None:
+        """
+        Tests that build_from_parsed_dict dynamically recalculates rSASA vectors
+        when residue identities are mutated (e.g. GLU vs ASP substitution).
+
+        Arrange:
+            Instantiate builder and create two parsed dict copies with differing mutation residue names
+            while sharing heavy atom coordinate structures.
+        Act:
+            Build graphs for both GLU and ASP mutant variants via build_from_parsed_dict.
+        Assert:
+            Verify that rSASA feature columns successfully reflect variant-specific normalization differences.
+        """
+        # Arrange
+        builder = ProteinGraphBuilder(distance_cutoff=10.0)
+
+        parsed_dict_glu = make_mock_parsed_dict(n_residues=4)
+        parsed_dict_asp = make_mock_parsed_dict(n_residues=4)
+
+        # Force distinct amino acid names at index 0 to simulate GLU vs ASP variant mutation
+        parsed_dict_glu["aa_list"][0] = "GLU"
+        parsed_dict_asp["aa_list"][0] = "ASP"
+        parsed_dict_glu["all_atom_res_names"] = [
+            "GLU" if res == "SER" else res
+            for res in parsed_dict_glu["all_atom_res_names"]
+        ]
+        parsed_dict_asp["all_atom_res_names"] = [
+            "ASP" if res == "SER" else res
+            for res in parsed_dict_asp["all_atom_res_names"]
+        ]
+
+        # Act
+        graph_glu = builder.build_from_parsed_dict(
+            parsed_dict=parsed_dict_glu, name="state_glu"
+        )
+        graph_asp = builder.build_from_parsed_dict(
+            parsed_dict=parsed_dict_asp, name="state_asp"
+        )
+
+        # Assert
+        rsasa_glu = graph_glu.x[:, RSASA_COL]
+        rsasa_asp = graph_asp.x[:, RSASA_COL]
+
+        # MaxASA values differ between GLU (666 A²) and ASP (558 A²), so normalized rSASA must diverge
+        assert not torch.allclose(
+            rsasa_glu, rsasa_asp
+        ), "rSASA features failed to dynamically update between GLU and ASP variants!"

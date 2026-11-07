@@ -49,8 +49,9 @@ def main():
     # Attach state code metadata
     graph_data.state_code = args.state_code
 
-    # Save compiled PyG Data object
-    out_path = Path.cwd() / args.output.name
+    # Save compiled PyG Data object directly using the path argument
+    out_path = Path(args.output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(graph_data, out_path)
 
 

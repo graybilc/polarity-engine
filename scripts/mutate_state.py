@@ -29,6 +29,12 @@ def parse_args():
         help="Binary state permutation code (e.g., '000', '100', '111').",
     )
     parser.add_argument(
+        "--mimic-res",
+        type=str,
+        default="GLU",
+        help="3-letter code for the phosphomimetic residue (e.g., 'GLU' or 'ASP').",
+    )
+    parser.add_argument(
         "--output",
         "-o",
         type=Path,
@@ -51,8 +57,12 @@ def main():
     print(f"[mutate_state] Loading wild-type dictionary from: {args.input}")
     wt_dict = StructureParser.load_parsed_dict(args.input)
 
-    print(f"[mutate_state] Applying state mutation code '{args.state_code}'...")
-    mutated_dict = mutate_structure_dict(wt_dict, args.state_code)
+    print(
+        f"[mutate_state] Applying state mutation code '{args.state_code}' with mimic residue '{args.mimic_res}'..."
+    )
+    mutated_dict = mutate_structure_dict(
+        wt_dict, args.state_code, mimic_res=args.mimic_res
+    )
 
     print(f"[mutate_state] Saving mutated structure dictionary to: {args.output}")
     torch.save(mutated_dict, args.output)

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Parses target CIF structure files, imputes missing loop coordinates from a reference template,
-
 and applies site mapping metadata.
 """
 
@@ -9,6 +8,7 @@ import json
 from pathlib import Path
 from typing import List, Optional
 from polarity_engine.parsers import StructureParser
+from polarity_engine.state_generator import mutate_sep_to_ser
 
 
 def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
@@ -82,6 +82,12 @@ def main(cli_args: Optional[List[str]] = None) -> None:
         str(args.cif),
         ref_cif_path=str(args.ref_cif),
         chain_ids=[args.chain],
+    )
+
+    # Since 8r3y natively contains SEP at site 663, mutate it back to clean unphosphorylated SER
+    # to establish the true unphosphorylated 000 baseline structure.
+    wt_parsed_dict = mutate_sep_to_ser(
+        wt_parsed_dict, target_res_num="663", target_chain=args.chain
     )
 
     # Attach site mapping metadata for downstream mutation and feature steps

@@ -1,19 +1,19 @@
 """
-Unit tests for phosphomimetic state mutation logic in state_generator.py.
+Unit tests for phosphomimetic and native state mutation logic in state_generator.py.
 """
 
 import copy
 import numpy as np
 import pytest
 
-from polarity_engine.state_generator import mutate_structure_dict
+from polarity_engine.state_generator import mutate_structure_dict, mutate_sep_to_ser
 from tests.mock_data import make_mock_parsed_dict
 
 
 class TestStateGenerator:
     """
     Test suite covering state mutation logic, array integrity,
-    and immutability contracts in state_generator.py.
+    custom mimic residues, and immutability contracts in state_generator.py.
     """
 
     def test_mutate_structure_dict_leaves_wt_unmodified(self) -> None:
@@ -88,6 +88,28 @@ class TestStateGenerator:
         assert "coords" in mutated_dict
         assert "nodes" in mutated_dict
 
+    def test_mutate_structure_dict_custom_mimic_res(self) -> None:
+        """
+        Verifies that specifying mimic_res='ASP' correctly applies Aspartate substitutions
+        instead of the default Glutamate (GLU).
+
+        Arrange:
+            Instantiate WT mock dictionary and select full-mutation state code '111'.
+        Act:
+            Call mutate_structure_dict with mimic_res='ASP'.
+        Assert:
+            Verify that 'ASP' is present in the mutated sequence and 'GLU' is absent.
+        """
+        # Arrange
+        wt_dict = make_mock_parsed_dict(n_residues=5)
+
+        # Act
+        mutated_dict = mutate_structure_dict(wt_dict, state_code="111", mimic_res="ASP")
+
+        # Assert
+        assert "ASP" in mutated_dict["aa_list"]
+        assert "GLU" not in mutated_dict["aa_list"]
+
     def test_mutate_structure_dict_invalid_state_code_raises_error(self) -> None:
         """
         Ensures invalid state codes (e.g., wrong length or non-binary digits) raise ValueError.
@@ -104,3 +126,71 @@ class TestStateGenerator:
         # Act & Assert
         with pytest.raises(ValueError):
             mutate_structure_dict(wt_dict, state_code=invalid_code)
+
+    def test_mutate_sep_to_ser_converts_residue_and_strips_phosphate(self) -> None:
+        """
+        Verifies that mutate_sep_to_ser correctly converts SEP to SER and strips phosphate atoms.
+
+        Arrange:
+            Construct a mock parsed dictionary containing a SEP residue with heavy atoms including 'P'.
+        Act:
+            Invoke mutate_sep_to_ser targeting the SEP residue.
+        Assert:
+            Verify SEP is replaced by SER in metadata and heavy-atom arrays, and phosphate atoms are removed.
+        """
+        # Arrange
+        parsed_dict = make_mock_parsed_dict(n_residues=3)
+        # Inject SEP at residue "663"
+        parsed_dict["aa_residues"][2] = ("663", "SEP")
+        parsed_dict["aa_list"][2] = "SEP"
+        parsed_dict["nodes"][2] = ("B", "663", "SEP")
+
+        # Add mock heavy atoms for SEP including phosphate 'P'
+        parsed_dict["all_atom_keys"] = [
+            ("B", "655"),
+            ("B", "655"),
+            ("B", "663"),
+            ("B", "663"),
+            ("B", "663"),
+        ]
+        parsed_dict["all_atom_names"] = ["N", "CA", "CB", "OG", "P"]
+        parsed_dict["all_atom_res_names"] = ["SER", "SER", "SEP", "SEP", "SEP"]
+        parsed_dict["all_atom_coords"] = np.zeros((5, 3), dtype=np.float64)
+
+        # Act
+        mutated_dict = mutate_sep_to_ser(parsed_dict, target_res_num="663")
+
+        # Assert
+        assert "SEP" not in mutated_dict["aa_list"]
+        assert mutated_dict["aa_list"][2] == "SER"
+        assert "P" not in mutated_dict["all_atom_names"]
+        assert all(res == "SER" for res in mutated_dict["all_atom_res_names"])
+
+    def test_mutate_structure_dict_differentiates_glu_and_asp_rsasa(self) -> None:
+        from polarity_engine.builder import ProteinGraphBuilder
+
+        # Arrange
+        wt_dict = make_mock_parsed_dict(n_residues=3)
+        wt_dict["coords"] = np.random.rand(3, 3).astype(
+            np.float32
+        )  # <-- Add this line!
+        wt_dict["all_atom_coords"] = np.random.rand(6, 3).astype(np.float64)
+        wt_dict["all_atom_keys"] = [("B", "655")] * 6
+        wt_dict["all_atom_names"] = ["N", "CA", "C", "O", "CB", "OG"]
+        wt_dict["all_atom_res_names"] = ["SER"] * 6
+
+        # Act
+        glu_dict = mutate_structure_dict(wt_dict, state_code="100", mimic_res="GLU")
+        asp_dict = mutate_structure_dict(wt_dict, state_code="100", mimic_res="ASP")
+
+        # Assert
+        assert len(glu_dict["all_atom_coords"]) != len(asp_dict["all_atom_coords"])
+
+        builder = ProteinGraphBuilder()
+        glu_graph = builder.build_from_parsed_dict(glu_dict, name="state_glu")
+        asp_graph = builder.build_from_parsed_dict(asp_dict, name="state_asp")
+
+        assert glu_graph.x.shape == asp_graph.x.shape
+        assert not np.array_equal(
+            glu_graph.x[:, 23].numpy(), asp_graph.x[:, 23].numpy()
+        )

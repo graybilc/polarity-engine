@@ -1,16 +1,22 @@
-nextflow.enable.dsl = 2
+params.cif_file   = "${projectDir}/data/8r3y.cif"
+params.ref_cif    = "${projectDir}/data/8r3y.cif"
+params.lgl_chain  = 'L'
+params.cutoff     = 8.0
+params.sites      = '655,659,663'
+params.mimic_res  = params.mimic_res ?: 'GLU'
+params.regime     = 'processive'
+params.alpha      = 1.2  // <-- Added tuned hyperparameter default
 
-params.cif_file  = "${projectDir}/data/8r3y.cif"
-params.ref_cif   = "${projectDir}/data/8r3y.cif"
-params.outdir    = "${projectDir}/output/module2"
-params.lgl_chain = 'L'
-params.cutoff    = 8.0
-params.sites     = '655,659,663'
+// Automatically isolate outputs and working directories by mimic residue
+params.outdir     = "${projectDir}/output"
+params.graphs_dir = "${params.outdir}/graphs/${params.mimic_res.toUpperCase()}"
+params.output_csv = "simulation_trajectories_${params.mimic_res.toLowerCase()}_${params.regime}.csv"
 
 include { ALIGN_CIF         } from './processes/align_cif'
 include { PARSE_WT_CIF      } from './processes/parse_wt_cif'
 include { MUTATE_STATE      } from './processes/mutate_state'
 include { BUILD_STATE_GRAPH } from './processes/build_state_graph'
+include { RUN_KINETICS      } from './processes/run_kinetics'
 
 workflow {
     ch_state_codes = Channel.fromList([
@@ -29,7 +35,7 @@ workflow {
         params.lgl_chain
     )
 
-    // 1. Parse Target CIF and Impute Missing Loops
+    // 1. Parse Target CIF (Capturing native SEP at 663 from 8r3y) and Impute Missing Loops
     PARSE_WT_CIF(
         ch_cif_file,
         ch_ref_cif,
@@ -38,8 +44,21 @@ workflow {
 
     // 2. State Combinatorics
     ch_mutate_inputs = ch_state_codes.combine(PARSE_WT_CIF.out.wt_parsed)
-    MUTATE_STATE(ch_mutate_inputs)
+    MUTATE_STATE(ch_mutate_inputs, params.mimic_res)
 
-    // 3. Graph Tensor Assembly
-    BUILD_STATE_GRAPH(MUTATE_STATE.out.mutated_dict)
+    // 3. Graph Tensor Assembly (Outputs 27-channel node feature tensors including SEP/SER and rSASA)
+    BUILD_STATE_GRAPH(MUTATE_STATE.out.mutated_dict, params.mimic_res)
+
+    // 4. Kinetic Simulation & rSASA Gating Solver
+    ch_all_graphs = BUILD_STATE_GRAPH.out.graph_pt
+        .map { state_code, graph_file -> graph_file }
+        .collect()
+
+    RUN_KINETICS(
+        params.mimic_res,
+        params.regime,
+        params.alpha,
+        ch_all_graphs,
+        ALIGN_CIF.out.site_mapping
+    )
 }
