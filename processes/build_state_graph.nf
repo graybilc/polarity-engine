@@ -6,7 +6,7 @@ process BUILD_STATE_GRAPH {
 
     input:
     tuple val(state_code), path(mutated_dict_pt)
-    val mimic_res // <-- KEEP THIS
+    val mimic_res
 
     output:
     tuple val(state_code), path("graph_${state_code}.pt"), emit: graph_pt
