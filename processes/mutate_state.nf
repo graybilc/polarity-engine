@@ -1,5 +1,5 @@
 process MUTATE_STATE {
-    tag "Mutate State ${state_code}"
+    tag "Mutate State ${state_code} (${mimic_res})"
     label 'process_medium'
 
     publishDir "${params.outdir}/mutated_states/${params.mimic_res}", mode: 'copy', overwrite: true
