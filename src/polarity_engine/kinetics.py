@@ -1,28 +1,31 @@
 """
 src/polarity_engine/kinetics.py
 
-Mass-action ODE solver for evaluating Processive vs. Dissociative
-multi-site phosphorylation regimes of Lgl by aPKC-Par6.
+Generalized Mass-Action ODE Solver for 3^3 Ternary State Networks (000 to 222).
+Evaluates Processive vs. Dissociative multi-site phosphorylation regimes of Lgl
+by aPKC-Par6, incorporating phospho-ablative Alanine ('2') knockouts alongside
+wild-type ('0') and phosphomimetic ('1') states.
 
 Incorporates ADR-0006 compliant Tier 1 parameterization derived exclusively
 from historical bulk assays (Graybill & Prehoda 2014; Graybill et al. 2012).
 """
 
+import itertools
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from scipy.integrate import solve_ivp
-from typing import Dict, Any, Tuple, Optional
 
-from polarity_engine.constants import NODE_FEATURE_INDICES
+NODE_FEATURE_INDICES = {"RSASA": 23}
 
 
 class PhosphoKineticSolver:
     """
-    Simulates concentration trajectories across an 8-state mass-action ODE hypercube
-    (S000 to S111) for multi-site phosphorylation of Lgl by aPKC-Par6.
+    Simulates concentration trajectories across a 27-state mass-action ODE grid
+    ('000' to '222') for multi-site phosphorylation and kinetic ablation of Lgl by aPKC-Par6.
 
     Attributes:
-        graphs (Dict[str, Any]): Dictionary mapping state codes to PyG structural graphs.
-        site_mappings (Dict[str, Any]): Mapping dictionary for abstract functional residue slots.
+        graphs (Dict[str, Any]): Structural PyG graph representations for each state.
+        site_mappings (Dict[str, Any]): Abstract functional site slot definitions.
         alpha (float): Structural sensitivity scaling factor for rSASA modulation.
         par6_active (bool): Flag indicating whether aPKC is activated via Par-6 binding.
         regime (str): Kinetic regime, either 'processive' or 'dissociative'.
@@ -38,8 +41,7 @@ class PhosphoKineticSolver:
         regime: str = "processive",
     ):
         """
-        Initializes the PhosphoKineticSolver with structural graphs, site mappings,
-        and regime-specific parameters.
+        Initializes the PhosphoKineticSolver with 27-state grid mappings and kinetic parameters.
 
         Args:
             graphs (Dict[str, Any]): Structural PyG graph representations for each state.
@@ -47,6 +49,9 @@ class PhosphoKineticSolver:
             alpha (float, optional): Sensitivity multiplier for rSASA gating. Defaults to 1.2.
             par6_active (bool, optional): Whether aPKC-Par6 is active. Defaults to True.
             regime (str, optional): Operating kinetic regime ('processive' or 'dissociative'). Defaults to "processive".
+
+        Returns:
+            None
 
         Raises:
             ValueError: If the regime argument is not 'processive' or 'dissociative'.
@@ -59,30 +64,49 @@ class PhosphoKineticSolver:
         if self.regime not in ["processive", "dissociative"]:
             raise ValueError("Regime must be either 'processive' or 'dissociative'.")
 
+        # Generate all 27 ternary state codes ('000', '001', ..., '222')
+        self.state_codes: List[str] = [
+            "".join(p) for p in itertools.product(["0", "1", "2"], repeat=3)
+        ]
+        self.state_to_idx: Dict[str, int] = {
+            code: i for i, code in enumerate(self.state_codes)
+        }
+
         # --- TIER 1 PARAMETERIZATION SET (ADR-0006 Compliant) ---
         k_cat_multiplier = 8.5 if self.par6_active else 1.0
 
-        self.base_rates = {
-            # Initial priming entry rates from unphosphorylated state (S000)
-            # Site 1 secondary entry
-            "k_000_100": 0.04 * k_cat_multiplier,
-            # Site 2 tertiary entry
-            "k_000_010": 0.07 * k_cat_multiplier,
-            # Site 3 primary preferential entry
-            "k_000_001": 0.22 * k_cat_multiplier,
-            # Downstream progression rates across intermediate states
-            "k_100_110": 0.15 * k_cat_multiplier,
-            "k_001_101": 0.20 * k_cat_multiplier,
-            # Explicitly added branch path rate
-            "k_010_011": 0.18 * k_cat_multiplier,
-            "k_110_111": 0.25 * k_cat_multiplier,
-            "k_101_111": 0.28 * k_cat_multiplier,
-            "k_011_111": 0.30 * k_cat_multiplier,
-            # Baseline dephosphorylation rates (estimated background phosphatase activity)
-            "k_100_000": 0.02,
-            "k_010_000": 0.03,
-            "k_001_000": 0.01,
+        # Site-specific baseline phosphorylation rates
+        self.site_base_rates = {
+            0: 0.04 * k_cat_multiplier,  # Site 1 (S655)
+            1: 0.07 * k_cat_multiplier,  # Site 2 (S659)
+            2: 0.22 * k_cat_multiplier,  # Site 3 (S663)
         }
+
+        # Baseline dephosphorylation / background phosphatase rates
+        self.dephospho_rates = {
+            0: 0.02,
+            1: 0.03,
+            2: 0.01,
+        }
+
+    def _resolve_target_res_num(self, functional_site_id: str) -> str:
+        """
+        Safely resolves residue number string from site mapping structures.
+
+        Args:
+            functional_site_id (str): Functional site identifier (e.g., 'site_1', 'site_2', 'site_3').
+
+        Returns:
+            str: Resolved amino acid sequence residue number string (e.g., '655').
+        """
+        sites_dict = self.site_mappings
+        if "sites" in sites_dict:
+            sites_dict = sites_dict["sites"]
+
+        site_entry = sites_dict.get(functional_site_id, functional_site_id)
+        if isinstance(site_entry, dict):
+            return str(site_entry.get("res_num", functional_site_id))
+        return str(site_entry)
 
     def _compute_rate_multiplier(
         self, state_code: str, functional_site_id: str
@@ -92,34 +116,48 @@ class PhosphoKineticSolver:
         Linear Free Energy Relationship (LFER) exponential scaling.
 
         Args:
-            state_code (str): Binary state code representing the current structural state (e.g., '100', '110').
-            functional_site_id (str): Functional site identifier (e.g., residue number).
+            state_code (str): Ternary state code representing the current structural state (e.g., '001', '120').
+            functional_site_id (str): Functional site identifier (e.g., residue number or site key).
 
         Returns:
             float: Calculated Arrhenius-style exponential rate multiplier based on relative SASA changes.
         """
         graph = self.graphs.get(state_code)
         wt_graph = self.graphs.get("000")
-        sites_dict = self.site_mappings.get("sites", {})
 
-        if graph is None or not sites_dict:
-            return 1.0
+        if graph is None:
+            raise KeyError(
+                f"Missing structural PyG graph for state code '{state_code}' in graphs dictionary."
+            )
+        if not hasattr(graph, "nodes"):
+            raise AttributeError(
+                f"Graph object for state code '{state_code}' lacks required 'nodes' attribute."
+            )
 
-        # Resolve target residue number from site mappings or direct identifier
-        target_res_num = str(sites_dict.get(functional_site_id, functional_site_id))
+        target_res_num = self._resolve_target_res_num(functional_site_id)
 
-        # Map residue number to 0-indexed tensor row via graph nodes
-        res_idx = next(
-            (i for i, node in enumerate(graph.nodes) if str(node[1]) == target_res_num),
-            None,
-        )
-        if res_idx is None or res_idx >= graph.x.shape[0]:
-            return 1.0
+        # Flexible node lookup supporting strings, integers, and different tuple positions
+        res_idx = None
+        for i, node in enumerate(graph.nodes):
+            # Check node elements or attributes safely
+            node_vals = node if isinstance(node, (list, tuple)) else [node]
+            if any(
+                str(val) == target_res_num
+                or str(val).lstrip("0") == target_res_num.lstrip("0")
+                for val in node_vals
+            ):
+                res_idx = i
+                break
 
-        # Extract rSASA feature for the target residue
+        if res_idx is None:
+            raise ValueError(
+                f"Target residue number '{target_res_num}' (from {functional_site_id}) "
+                f"not found in graph nodes for state code '{state_code}' (Nodes: {graph.nodes[:5]}...)."
+            )
+
         r_sasa = graph.x[res_idx, NODE_FEATURE_INDICES["RSASA"]].item()
 
-        # Extract baseline rSASA from wild-type graph ("000") if available
+        # Wild-type graph fallback can remain gentle or raise, but raising ensures strict baseline integrity
         wt_r_sasa = r_sasa
         if wt_graph is not None and hasattr(wt_graph, "nodes"):
             wt_res_idx = next(
@@ -133,18 +171,17 @@ class PhosphoKineticSolver:
             if wt_res_idx is not None and wt_res_idx < wt_graph.x.shape[0]:
                 wt_r_sasa = wt_graph.x[wt_res_idx, NODE_FEATURE_INDICES["RSASA"]].item()
 
-        # Compute LFER exponential scaling based on Delta rSASA
         delta_r_sasa = r_sasa - wt_r_sasa
         return float(np.exp(self.alpha * delta_r_sasa))
 
     def _get_regime_scaler(self, transition_from: str, transition_to: str) -> float:
         """
-        Applies topological scaling based on the change in phosphorylation count
-        between adjacent states in the hypercube.
+        Applies processive vs. dissociative topological scaling based on
+        accumulated phosphomimetic/phosphorylation state transitions.
 
         Args:
-            transition_from (str): Binary state code of the originating state (e.g., '100').
-            transition_to (str): Binary state code of the destination state (e.g., '110').
+            transition_from (str): Ternary state code of the originating state (e.g., '000').
+            transition_to (str): Ternary state code of the destination state (e.g., '001').
 
         Returns:
             float: Topological scaling factor (>1.0 for processive acceleration,
@@ -160,94 +197,88 @@ class PhosphoKineticSolver:
                 return 0.4
         return 1.0
 
-    def _ode_system(self, t: float, y: np.ndarray) -> list:
+    def _build_rate_matrix(self) -> np.ndarray:
         """
-        Defines the mass-action ordinary differential equations across the 8-state hypercube.
+        Constructs the 27x27 mass-action transition rate matrix across all single-step transitions.
+        Alanine ('2') mutations zero out forward phosphorylation fluxes at mutated sites.
 
         Args:
-            t (float): Current time step in the solver integration.
-            y (np.ndarray): Current concentration vector for the 8 states
-                            [s000, s100, s010, s001, s110, s101, s011, s111].
+            None
 
         Returns:
-            list: Time derivatives (ds/dt) for each of the 8 hypercube states.
+            np.ndarray: A 27x27 floating-point transition rate coefficient matrix ($K$).
         """
-        s000, s100, s010, s001, s110, s101, s011, s111 = y
+        n_states = len(self.state_codes)
+        K = np.zeros((n_states, n_states), dtype=np.float64)
 
-        # rSASA Gating Multipliers (Queried using the destination/mutated states)
-        m_000_100 = self._compute_rate_multiplier("100", "site_1")
-        m_000_010 = self._compute_rate_multiplier("010", "site_2")
-        m_000_001 = self._compute_rate_multiplier("001", "site_3")
+        # Use canonical residue numbers directly as site identifiers
+        target_residues = ["655", "659", "663"]
 
-        m_100_110 = self._compute_rate_multiplier("110", "site_2")
-        m_001_101 = self._compute_rate_multiplier("101", "site_1")
-        m_010_011 = self._compute_rate_multiplier("011", "site_3")
+        for src_idx, src_code in enumerate(self.state_codes):
+            for site_idx, res_num in enumerate(target_residues):
+                src_char = src_code[site_idx]
 
-        m_110_111 = self._compute_rate_multiplier("111", "site_3")
-        m_101_111 = self._compute_rate_multiplier("111", "site_2")
-        m_011_111 = self._compute_rate_multiplier("111", "site_1")
+                # Forward Phosphorylation Transition ('0' -> '1')
+                if src_char == "0":
+                    tgt_code = src_code[:site_idx] + "1" + src_code[site_idx + 1 :]
+                    tgt_idx = self.state_to_idx[tgt_code]
 
-        # Regime-Dependent Topological Scalers
-        sc_110 = self._get_regime_scaler("100", "110")
-        sc_101 = self._get_regime_scaler("001", "101")
-        sc_011 = self._get_regime_scaler("010", "011")
-        sc_111 = self._get_regime_scaler("x", "111")
+                    m_rsasa = self._compute_rate_multiplier(tgt_code, res_num)
+                    sc_regime = self._get_regime_scaler(src_code, tgt_code)
 
-        # Effective Rates
-        k_0_100 = self.base_rates["k_000_100"] * m_000_100
-        k_0_010 = self.base_rates["k_000_010"] * m_000_010
-        k_0_001 = self.base_rates["k_000_001"] * m_000_001
+                    k_fwd = self.site_base_rates[site_idx] * m_rsasa * sc_regime
+                    K[tgt_idx, src_idx] += k_fwd
+                    K[src_idx, src_idx] -= k_fwd
 
-        k_100_110 = self.base_rates["k_100_110"] * m_100_110 * sc_110
-        k_001_101 = self.base_rates["k_001_101"] * m_001_101 * sc_101
-        k_010_011 = self.base_rates["k_010_011"] * m_010_011 * sc_011
+                # Reverse Dephosphorylation Transition ('1' -> '0')
+                elif src_char == "1":
+                    tgt_code = src_code[:site_idx] + "0" + src_code[site_idx + 1 :]
+                    tgt_idx = self.state_to_idx[tgt_code]
 
-        k_110_111 = self.base_rates["k_110_111"] * m_110_111 * sc_111
-        k_101_111 = self.base_rates["k_101_111"] * m_101_111 * sc_111
-        k_011_111 = self.base_rates["k_011_111"] * m_011_111 * sc_111
+                    k_rev = self.dephospho_rates[site_idx]
+                    K[tgt_idx, src_idx] += k_rev
+                    K[src_idx, src_idx] -= k_rev
 
-        # Mass-Action Differential Equations
-        ds000_dt = -(k_0_100 + k_0_010 + k_0_001) * s000 + (
-            self.base_rates["k_100_000"] * s100
-            + self.base_rates["k_010_000"] * s010
-            + self.base_rates["k_001_000"] * s001
-        )
+        return K
 
-        ds100_dt = (k_0_100 * s000) - (self.base_rates["k_100_000"] + k_100_110) * s100
-        ds010_dt = (k_0_010 * s000) - (self.base_rates["k_010_000"] + k_010_011) * s010
-        ds001_dt = (k_0_001 * s000) - (self.base_rates["k_001_000"] + k_001_101) * s001
+    def _ode_system(self, t: float, y: np.ndarray) -> np.ndarray:
+        """
+        Defines the mass-action ODE matrix multiplication: dy/dt = K * y.
 
-        ds110_dt = (k_100_110 * s100) - (k_110_111 * s110)
-        ds101_dt = (k_001_101 * s001) - (k_101_111 * s101)
-        ds011_dt = (k_010_011 * s010) - (k_011_111 * s011)
+        Args:
+            t (float): Current time step in solver integration.
+            y (np.ndarray): Current concentration vector across the 27 ternary states.
 
-        ds111_dt = (k_110_111 * s110) + (k_101_111 * s101) + (k_011_111 * s011)
-        return [
-            ds000_dt,
-            ds100_dt,
-            ds010_dt,
-            ds001_dt,
-            ds110_dt,
-            ds101_dt,
-            ds011_dt,
-            ds111_dt,
-        ]
+        Returns:
+            np.ndarray: Time derivatives vector (dy/dt) for each of the 27 states.
+        """
+        K = self._build_rate_matrix()
+        return K @ y
 
     def simulate(
-        self, t_span: Tuple[float, float] = (0, 100), y0: Optional[list] = None
+        self,
+        t_span: Tuple[float, float] = (0, 100),
+        y0: Optional[np.ndarray] = None,
+        initial_state: str = "000",
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Executes the ODE time-course simulation using SciPy's solve_ivp.
+        Executes the ODE time-course simulation across the 27-state grid.
 
         Args:
             t_span (Tuple[float, float], optional): Integration time window (t_start, t_end). Defaults to (0, 100).
-            y0 (Optional[list], optional): Initial state concentrations across the 8 states.
+            y0 (Optional[np.ndarray], optional): Initial 27-element concentration vector. Defaults to None.
+            initial_state (str, optional): Starting ternary state code if y0 is None (e.g., '000' or '020'). Defaults to "000".
 
         Returns:
-            Tuple[np.ndarray, np.ndarray]: A tuple containing evaluation time points and concentration trajectories.
+            Tuple[np.ndarray, np.ndarray]: A tuple containing:
+                - time_points (np.ndarray): 1D array of evaluation time points.
+                - trajectories (np.ndarray): 27xN array of state concentration trajectories over time.
         """
+        n_states = len(self.state_codes)
         if y0 is None:
-            y0 = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            y0 = np.zeros(n_states, dtype=np.float64)
+            start_idx = self.state_to_idx.get(initial_state, 0)
+            y0[start_idx] = 1.0
 
         solution = solve_ivp(
             fun=self._ode_system,

@@ -1,8 +1,8 @@
 process MUTATE_STATE {
-    tag "Mutate State ${state_code} (${mimic_res})"
+    tag "Mutate State ${state_code} (${mimic_res.toUpperCase()})"
     label 'process_medium'
 
-    publishDir "${params.outdir}/mutated_states/${params.mimic_res}", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/mutated_states/${params.mimic_res.toUpperCase()}", mode: 'copy', overwrite: true
 
     input:
     tuple val(state_code), path(wt_parsed_pt)

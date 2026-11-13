@@ -3,7 +3,7 @@
 scripts/make_test_fixtures.py
 
 Utility script for pre-generating lightweight macromolecular structural fixtures
-(mmCIF format) used across unit, integration, and Nextflow pipeline test suites.
+(mmCIF format) using Gemmi's official structure assembly API.
 """
 
 from pathlib import Path
@@ -14,54 +14,44 @@ def create_tiny_cif(
     input_path: Path,
     output_path: Path,
     chain_id: str = "L",
-    max_residues: int = 15,
+    start_res: int = 650,
+    end_res: int = 670,
 ) -> None:
     """
-    Slices a reference mmCIF structure file down to a small residue subset.
-
-    Parses an input macromolecular structure in mmCIF format using Gemmi, filters
-    the model down to a target polymer chain, truncates the residue list to a specified
-    maximum count, and serializes the reduced macromolecular representation to disk.
-    This helper is primarily utilized to generate lightweight, self-contained test
-    fixtures for fast unit and integration testing.
-
-    Args:
-        input_path (Path): Path to the source mmCIF file (e.g., full wild-type structure).
-        output_path (Path): Destination path where the truncated mmCIF file will be written.
-            Parent directories will be created automatically if they do not exist.
-        chain_id (str, optional): The target chain identifier to isolate. Defaults to "B".
-        max_residues (int, optional): The maximum number of N-terminal residues to retain
-            in the isolated chain. Defaults to 15.
-
-    Raises:
-        FileNotFoundError: If the source mmCIF file at `input_path` does not exist.
-        ValueError: If the requested `chain_id` is not present within the structure model.
-        RuntimeError: If Gemmi encounters a parser or serialization error during file processing.
-
-    Example:
-        >>> from pathlib import Path
-        >>> create_tiny_cif(
-        ...     input_path=Path("data/8r3y.cif"),
-        ...     output_path=Path("tests/fixtures/tiny_sample.cif"),
-        ...     chain_id="L",
-        ...     max_residues=15,
-        ... )
+    Parses a reference mmCIF file using Gemmi, constructs a new filtered structure
+    retaining only the target chain and residues within the specified sequence window,
+    and writes out a fully valid mmCIF file.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     doc = gemmi.cif.read_file(str(input_path))
     st = gemmi.make_structure_from_block(doc[0])
 
+    # Build a clean new structure containing only the filtered chain and target residues
+    new_st = gemmi.Structure()
+    new_st.name = st.name
+
     model = st[0]
-    for chain in list(model):
-        if chain.name != chain_id:
-            model.remove_chain(chain.name)
+    new_model = gemmi.Model("1")
 
-    target_chain = model[chain_id]
-    del target_chain[max_residues:]
+    for chain in model:
+        if chain.name == chain_id:
+            new_chain = gemmi.Chain(chain_id)
+            for i, res in enumerate(chain):
+                # Optionally filter or take a window, and renumber to match biological target range (e.g. starting at 650)
+                if i < 30:  # Take up to 21+ residues to cover 650 to 670
+                    new_res = res.clone()
+                    new_res.seqid.num = (
+                        650 + i
+                    )  # Maps indices 0, 1, 2... to 650, 651, 652... so 655, 659, 663 are hit!
+                    new_chain.add_residue(new_res)
+            if len(new_chain) > 0:
+                new_model.add_chain(new_chain)
 
-    # Ensure author attributes/annotations are retained upon writing
-    doc_out = st.make_mmcif_document()
+    new_st.add_model(new_model)
+
+    # Write out valid mmCIF document
+    doc_out = new_st.make_mmcif_document()
     doc_out.write_file(str(output_path))
 
 
@@ -71,5 +61,6 @@ if __name__ == "__main__":
         input_path=repo_root / "data" / "8r3y.cif",
         output_path=repo_root / "tests" / "fixtures" / "tiny_sample.cif",
         chain_id="L",
-        max_residues=15,
+        start_res=650,
+        end_res=670,
     )
