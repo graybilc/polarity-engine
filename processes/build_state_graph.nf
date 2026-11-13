@@ -22,6 +22,6 @@ process BUILD_STATE_GRAPH {
 
     stub:
     """
-    touch "graph_${state_code}.pt"
+    python -c "import torch; from torch_geometric.data import Data; data = Data(x=torch.zeros(30, 32), edge_index=torch.zeros((2, 0), dtype=torch.long)); data.nodes = [('A', '655')]*10 + [('A', '659')]*10 + [('A', '663')]*10; data.state_code = '${state_code}'; torch.save(data, 'graph_${state_code}.pt')"
     """
 }

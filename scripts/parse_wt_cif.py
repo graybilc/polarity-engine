@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import List, Optional
 from polarity_engine.parsers import StructureParser
-from polarity_engine.state_generator import mutate_sep_to_ser
+from polarity_engine.state_generator import StateGenerator
 
 
 def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
@@ -84,9 +84,10 @@ def main(cli_args: Optional[List[str]] = None) -> None:
         chain_ids=[args.chain],
     )
 
-    # Since 8r3y natively contains SEP at site 663, mutate it back to clean unphosphorylated SER
+    # Instantiate StateGenerator and mutate native SEP back to clean unphosphorylated SER
     # to establish the true unphosphorylated 000 baseline structure.
-    wt_parsed_dict = mutate_sep_to_ser(
+    state_generator = StateGenerator()
+    wt_parsed_dict = state_generator.mutate_sep_to_ser(
         wt_parsed_dict, target_res_num="663", target_chain=args.chain
     )
 
